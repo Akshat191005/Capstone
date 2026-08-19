@@ -11,14 +11,23 @@ from app.risk.engine import RiskEngine
 from app.quantitative.indicators import QuantitativeEngine
 from app.sentiment.engine import SentimentEngine
 
-# Instantiate Sentiment Engine once as it loads a model
-sentiment_engine = SentimentEngine()
+# Lazy load sentiment engine
+_sentiment_engine = None
+
+def get_sentiment_engine():
+    global _sentiment_engine
+    if _sentiment_engine is None:
+        _sentiment_engine = SentimentEngine()
+    return _sentiment_engine
 
 def ingest_data_node(state: AgentState) -> dict:
     symbol = state.get("symbol")
     
     # 1. Fetch Data
     historical_df = MarketDataAdapter.get_historical_data(symbol)
+    if historical_df is None or historical_df.empty:
+        raise ValueError(f"No market data found for symbol: {symbol}")
+        
     fundamentals = MarketDataAdapter.get_fundamentals(symbol)
     news = NewsDataAdapter.get_company_news(symbol)
     
@@ -30,11 +39,12 @@ def ingest_data_node(state: AgentState) -> dict:
     quant_signals = QuantitativeEngine.generate_signals(quant_df)
     
     # Sentiment analysis
-    news_sentiment = sentiment_engine.analyze_news(news)
-    aggregate_sentiment = sentiment_engine.get_aggregate_sentiment(news_sentiment)
+    engine = get_sentiment_engine()
+    news_sentiment = engine.analyze_news(news)
+    aggregate_sentiment = engine.get_aggregate_sentiment(news_sentiment)
     
     return {
-        "market_data": historical_df.to_dict() if historical_df is not None else None,
+        "market_data": None, # Removed historical_df.to_dict() to prevent state bloat
         "news_data": news,
         "fundamentals": fundamentals,
         "risk_metrics": risk_metrics,

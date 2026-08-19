@@ -93,7 +93,7 @@ export default function HomePage() {
         <div className="container">
           <div className="hero-badge animate-fade-up">
             <span className="dot" />
-            Live Markets · 5 AI Agents Active
+            Simulated Markets · 5 AI Agents Active
           </div>
 
           <h1 className="hero-title animate-fade-up-delay-1">
@@ -138,7 +138,10 @@ export default function HomePage() {
       {/* Market Overview */}
       <section className="market-section">
         <div className="container">
-          <div className="section-label">Live Market Overview</div>
+          <div className="section-label">
+            Simulated Market Overview 
+            <span style={{fontSize: '0.75rem', backgroundColor: '#ff4d4f', padding: '2px 8px', borderRadius: '4px', marginLeft: '12px', color: 'white'}}>MOCK DATA</span>
+          </div>
           <h2 className="section-title">Popular Stocks</h2>
           <p className="section-subtitle">
             30-day price trends for top Indian and global equities. Click "Analyze" to run a full AI consensus.

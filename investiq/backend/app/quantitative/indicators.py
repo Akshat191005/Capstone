@@ -18,11 +18,13 @@ class QuantitativeEngine:
         result['SMA_50'] = close.rolling(window=50).mean()
         result['EMA_20'] = close.ewm(span=20, adjust=False).mean()
         
-        # RSI (Relative Strength Index)
+        # RSI (Relative Strength Index) using Wilder's Smoothing
         delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        rs = avg_gain / avg_loss
         result['RSI_14'] = 100 - (100 / (1 + rs))
         
         # MACD (Moving Average Convergence Divergence)

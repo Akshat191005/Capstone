@@ -25,7 +25,7 @@ class SentimentEngine:
 
         results = []
         for article in news_articles:
-            text = article.get('title', '') + " " + article.get('summary', '')
+            text = article.get('headline', '') + " " + article.get('summary', '')
             text = text.strip()
             
             if not text:

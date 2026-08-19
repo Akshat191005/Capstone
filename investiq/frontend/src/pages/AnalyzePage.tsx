@@ -19,6 +19,7 @@ interface AnalysisResult {
   };
   risk_metrics?: Record<string, number | string>;
   sentiment_scores?: Record<string, number | string>;
+  is_demo_mode?: boolean;
 }
 
 const AGENT_CONFIG = [
@@ -84,7 +85,8 @@ export default function AnalyzePage() {
     setResult(null);
 
     try {
-      const response = await fetch('http://localhost:8000/api/analyze', {
+      const endpoint = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/analyze` : 'http://localhost:8000/api/analyze';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -190,7 +192,12 @@ export default function AnalyzePage() {
         {result && !loading && (
           <div className="results-container">
             {/* Meta Consensus */}
-            <div className="glass-card meta-consensus-card">
+            <div className="glass-card meta-consensus-card" style={{ position: 'relative' }}>
+              {result.is_demo_mode && (
+                <div style={{ position: 'absolute', top: 16, right: 16, background: '#ff4d4f', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 'bold' }}>
+                  DEMO MODE
+                </div>
+              )}
               <div className="consensus-label">Meta-Agent Consensus</div>
               <div className="consensus-symbol">📌 {result.symbol}</div>
               <div className={`consensus-signal ${signal}`}>

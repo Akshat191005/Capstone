@@ -10,13 +10,13 @@ class RiskEngine:
         Returns volatility and 95% Value at Risk (VaR).
         """
         if df is None or df.empty or 'Close' not in df:
-            return {"volatility_annualized": None, "var_95": None}
+            return {"volatility_annualized": None, "historical_var_95": None, "parametric_var_95": None, "max_drawdown": None}
             
         # Calculate daily returns
         returns = df['Close'].pct_change().dropna()
         
         if returns.empty:
-            return {"volatility_annualized": None, "var_95": None}
+            return {"volatility_annualized": None, "historical_var_95": None, "parametric_var_95": None, "max_drawdown": None}
             
         # Annualized Volatility (assuming 252 trading days)
         volatility = returns.std() * np.sqrt(252)
