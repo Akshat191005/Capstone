@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.orchestration.graph import workflow
+from app.data.symbol_resolver import resolve_symbol, search_symbols
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
@@ -13,19 +14,50 @@ class AnalyzeRequest(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     symbol: str
+    resolved_symbol: str
     final_decision: Dict[str, Any]
     risk_metrics: Optional[Dict[str, Any]]
     sentiment_scores: Optional[Dict[str, Any]]
     is_demo_mode: bool = False
 
+class SymbolSuggestion(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    type: str
+    logo_url: str = ""
+
+@router.get("/search", response_model=List[SymbolSuggestion])
+async def search_stock_symbols(q: str = Query(..., min_length=1, description="Company name or partial ticker")):
+    """
+    Search for stock symbols by company name or ticker (used for autocomplete).
+    """
+    try:
+        results = await run_in_threadpool(search_symbols, q)
+        return results
+    except Exception as e:
+        print(f"Symbol search error: {e}")
+        return []
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_stock(request: AnalyzeRequest):
     """
     Run the full LangGraph orchestration pipeline for a given stock symbol.
+    Accepts company names, typos, or exact tickers — resolves to the correct symbol automatically.
     """
     try:
+        raw_input = request.symbol.strip()
+        
+        # Resolve company name / typo → actual ticker symbol
+        resolved = await run_in_threadpool(resolve_symbol, raw_input)
+        if not resolved:
+            raise ValueError(
+                f"Could not find a stock symbol for '{raw_input}'. "
+                f"Try a specific ticker like 'RELIANCE.NS', 'AAPL', or 'TCS.NS'."
+            )
+
         initial_state = {
-            "symbol": request.symbol.upper(),
+            "symbol": resolved,
             "provider": request.provider,
             "api_key": request.api_key
         }
@@ -45,7 +77,8 @@ async def analyze_stock(request: AnalyzeRequest):
                 is_demo = True
 
         return AnalyzeResponse(
-            symbol=result.get("symbol"),
+            symbol=raw_input,          # original user input
+            resolved_symbol=resolved,  # what was actually analyzed
             final_decision=final_decision,
             risk_metrics=result.get("risk_metrics"),
             sentiment_scores=result.get("sentiment_scores"),

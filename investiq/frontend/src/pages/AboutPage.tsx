@@ -27,7 +27,7 @@ const AGENTS = [
   {
     icon: '📰',
     name: 'Sentiment Agent',
-    desc: 'Fetches the latest 10 news headlines via DuckDuckGo and runs them through the ProsusAI/FinBERT model — a financial-domain BERT fine-tuned on FiQA, Headline, and Financial PhraseBank datasets.',
+    desc: 'Fetches the latest 10 news headlines via DuckDuckGo and runs them through the ProsusAI/FinBERT model, a financial-domain BERT fine-tuned on FiQA, Headline, and Financial PhraseBank datasets.',
     inputs: ['News Headlines', 'FinBERT Model'],
     output: 'Sentiment Score',
   },

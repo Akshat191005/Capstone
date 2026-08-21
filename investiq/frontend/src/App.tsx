@@ -6,15 +6,28 @@ import AboutPage from './pages/AboutPage';
 import './index.css';
 import './App.css';
 
+import LoginPage from './pages/LoginPage';
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Navbar />
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/analyze" element={<AnalyzePage />} />
-        <Route path="/about" element={<AboutPage />} />
+        <Route path="/*" element={<AppLayout />} />
       </Routes>
     </BrowserRouter>
+  );
+}
+
+function AppLayout() {
+  return (
+    <>
+      <Navbar />
+      <Routes>
+        <Route path="/about" element={<AboutPage />} />
+      </Routes>
+    </>
   );
 }

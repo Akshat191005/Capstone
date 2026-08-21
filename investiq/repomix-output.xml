@@ -1,0 +1,4459 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+backend/
+  app/
+    agents/
+      fundamental.py
+      llm_factory.py
+      meta.py
+      quantitative.py
+      risk.py
+      sentiment.py
+      state.py
+    api/
+      __init__.py
+      endpoints.py
+    data/
+      __init__.py
+      market_data.py
+      news_data.py
+      symbol_resolver.py
+    orchestration/
+      __init__.py
+      graph.py
+    quantitative/
+      __init__.py
+      indicators.py
+    risk/
+      __init__.py
+      engine.py
+    sentiment/
+      __init__.py
+      engine.py
+    __init__.py
+    main.py
+  tests/
+    __init__.py
+    test_data.py
+  .env.example
+  requirements.txt
+docs/
+  reference-repository-differences.md
+  requirements-traceability.md
+frontend/
+  public/
+    favicon.svg
+    icons.svg
+  src/
+    assets/
+      hero.png
+      react.svg
+      vite.svg
+    components/
+      Navbar.tsx
+    data/
+      stocks.ts
+    pages/
+      AboutPage.tsx
+      AnalyzePage.tsx
+      HomePage.css
+      HomePage.tsx
+      LoginPage.css
+      LoginPage.tsx
+    App.css
+    App.tsx
+    index.css
+    main.tsx
+  .gitignore
+  .oxlintrc.json
+  index.html
+  package.json
+  README.md
+  tsconfig.app.json
+  tsconfig.json
+  tsconfig.node.json
+  vite.config.ts
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="backend/app/agents/fundamental.py">
+import os
+from langchain_core.prompts import ChatPromptTemplate
+from .state import AgentState
+from .llm_factory import get_llm
+import json
+
+
+def fundamental_agent(state: AgentState) -> dict:
+    """Analyzes the company fundamentals and generates a fundamental signal."""
+    llm = get_llm(state)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert Fundamental Analyst. Analyze the company financials (P/E, Debt-to-Equity, Cash Flow, etc.) and provide a trading signal (BUY/HOLD/SELL) with reasoning. Your output must be valid JSON with keys: 'signal' and 'reasoning'."),
+        ("human", "Symbol: {symbol}\nFundamentals: {fundamentals}")
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({
+        "symbol": state.get("symbol"),
+        "fundamentals": json.dumps(state.get("fundamentals", {}))
+    })
+    
+    try:
+        content = response.content
+        if isinstance(content, list):
+            content = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        analysis = json.loads(content)
+    except Exception as e:
+        analysis = {"signal": "HOLD", "reasoning": f"Failed to parse LLM output: {e}"}
+        
+    return {"fundamental_analysis": analysis}
+</file>
+
+<file path="backend/app/agents/llm_factory.py">
+import os
+import logging
+from typing import Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+def get_llm(state: Optional[Dict[str, Any]] = None):
+    """
+    Returns the appropriate LangChain chat model.
+    Prioritizes the provider and api_key passed in from the frontend via the state.
+    Falls back to .env variables if no user-provided key is available.
+    """
+    
+    # 1. User-provided key from the frontend UI
+    if state and state.get("api_key") and state.get("provider"):
+        provider = state.get("provider", "").lower()
+        api_key = state.get("api_key")
+        
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
+            
+        elif provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+            return ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0, api_key=api_key)
+            
+        elif provider == "gemini":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0, google_api_key=api_key)
+            
+        else:
+            raise ValueError(f"Unsupported provider from UI: {provider}")
+
+    # 2. Server-side fallback from .env
+    # Priority: OpenAI > Anthropic > Gemini > Groq
+    if os.environ.get("OPENAI_API_KEY"):
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0)
+        
+    elif os.environ.get("GEMINI_API_KEY"):
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0)
+        
+    elif os.environ.get("GROQ_API_KEY"):
+        from langchain_groq import ChatGroq
+        return ChatGroq(model_name="llama-3.1-70b-versatile", temperature=0)
+        
+    else:
+        raise ValueError("No valid API key found. Please provide an API key in the UI or in the server .env file.")
+</file>
+
+<file path="backend/app/agents/meta.py">
+import os
+from langchain_core.prompts import ChatPromptTemplate
+from .state import AgentState
+from .llm_factory import get_llm
+import json
+
+
+def meta_agent(state: AgentState) -> dict:
+    """Synthesizes all specialist agent outputs into a final decision."""
+    llm = get_llm(state)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are the Chief Investment Officer (Meta-Agent). Review the signals from the Quant, Fundamental, Sentiment, and Risk agents. Resolve any conflicts, weigh the evidence, and make a final investment decision (BUY/HOLD/SELL). Provide detailed reasoning that references the sub-agents' findings. Your output must be valid JSON with keys: 'final_signal', 'confidence_score' (0.0 to 1.0), and 'reasoning'."),
+        ("human", "Symbol: {symbol}\n\nQuant: {quant}\nFundamental: {fundamental}\nSentiment: {sentiment}\nRisk: {risk}")
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({
+        "symbol": state.get("symbol"),
+        "quant": json.dumps(state.get("quant_analysis", {})),
+        "fundamental": json.dumps(state.get("fundamental_analysis", {})),
+        "sentiment": json.dumps(state.get("sentiment_analysis", {})),
+        "risk": json.dumps(state.get("risk_analysis", {}))
+    })
+    
+    try:
+        content = response.content
+        if isinstance(content, list):
+            content = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        analysis = json.loads(content)
+    except Exception as e:
+        analysis = {"final_signal": "HOLD", "confidence_score": 0.0, "reasoning": f"Failed to parse LLM output: {e}"}
+        
+    return {"final_decision": analysis}
+</file>
+
+<file path="backend/app/agents/quantitative.py">
+import os
+from langchain_core.prompts import ChatPromptTemplate
+from .state import AgentState
+from .llm_factory import get_llm
+import json
+
+
+def quant_agent(state: AgentState) -> dict:
+    """Analyzes the technical indicators and generates a quantitative signal."""
+    llm = get_llm(state)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert Quantitative Analyst. Analyze the technical indicators and provide a trading signal (BUY/HOLD/SELL) with reasoning. Your output must be valid JSON with keys: 'signal' and 'reasoning'."),
+        ("human", "Symbol: {symbol}\nQuant Indicators: {indicators}")
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({
+        "symbol": state.get("symbol"),
+        "indicators": json.dumps(state.get("quant_indicators", {}))
+    })
+    
+    try:
+        # Assuming the LLM returns JSON text, we parse it
+        # If it includes markdown code blocks, strip them
+        content = response.content
+        if isinstance(content, list):
+            content = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        analysis = json.loads(content)
+    except Exception as e:
+        analysis = {"signal": "HOLD", "reasoning": f"Failed to parse LLM output: {e}"}
+        
+    return {"quant_analysis": analysis}
+</file>
+
+<file path="backend/app/agents/risk.py">
+import os
+from langchain_core.prompts import ChatPromptTemplate
+from .state import AgentState
+from .llm_factory import get_llm
+import json
+
+
+def risk_agent(state: AgentState) -> dict:
+    """Analyzes the risk metrics (VaR, Volatility) and generates a risk signal."""
+    llm = get_llm(state)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert Risk Manager. Analyze the VaR, Volatility, and Drawdown metrics and provide a trading signal (BUY/HOLD/SELL) with reasoning. Be very cautious of high volatility or VaR. Your output must be valid JSON with keys: 'signal' and 'reasoning'."),
+        ("human", "Symbol: {symbol}\nRisk Metrics: {risk}")
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({
+        "symbol": state.get("symbol"),
+        "risk": json.dumps(state.get("risk_metrics", {}))
+    })
+    
+    try:
+        content = response.content
+        if isinstance(content, list):
+            content = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        analysis = json.loads(content)
+    except Exception as e:
+        analysis = {"signal": "HOLD", "reasoning": f"Failed to parse LLM output: {e}"}
+        
+    return {"risk_analysis": analysis}
+</file>
+
+<file path="backend/app/agents/sentiment.py">
+import os
+from langchain_core.prompts import ChatPromptTemplate
+from .state import AgentState
+from .llm_factory import get_llm
+import json
+
+
+def sentiment_agent(state: AgentState) -> dict:
+    """Analyzes news sentiment scores and generates a sentiment signal."""
+    llm = get_llm(state)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert Sentiment Analyst. Analyze the aggregated sentiment scores from recent news and provide a trading signal (BUY/HOLD/SELL) with reasoning. Your output must be valid JSON with keys: 'signal' and 'reasoning'."),
+        ("human", "Symbol: {symbol}\nSentiment Scores: {sentiment}")
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({
+        "symbol": state.get("symbol"),
+        "sentiment": json.dumps(state.get("sentiment_scores", {}))
+    })
+    
+    try:
+        content = response.content
+        if isinstance(content, list):
+            content = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        analysis = json.loads(content)
+    except Exception as e:
+        analysis = {"signal": "HOLD", "reasoning": f"Failed to parse LLM output: {e}"}
+        
+    return {"sentiment_analysis": analysis}
+</file>
+
+<file path="backend/app/agents/state.py">
+from typing import TypedDict, Dict, Any, List, Optional
+
+class AgentState(TypedDict):
+    symbol: str
+    provider: Optional[str]
+    api_key: Optional[str]
+    
+    # Raw Data
+    market_data: Optional[Dict[str, Any]]
+    news_data: Optional[List[Dict[str, str]]]
+    fundamentals: Optional[Dict[str, Any]]
+    
+    # Engine Outputs
+    risk_metrics: Optional[Dict[str, Any]]
+    quant_indicators: Optional[Dict[str, Any]]
+    sentiment_scores: Optional[Dict[str, Any]]
+    
+    # Agent Outputs (from LLM)
+    quant_analysis: Optional[Dict[str, Any]]
+    fundamental_analysis: Optional[Dict[str, Any]]
+    sentiment_analysis: Optional[Dict[str, Any]]
+    risk_analysis: Optional[Dict[str, Any]]
+    
+    # Final Output
+    final_decision: Optional[Dict[str, Any]]
+</file>
+
+<file path="backend/app/api/__init__.py">
+from .endpoints import router
+</file>
+
+<file path="backend/app/api/endpoints.py">
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from typing import Dict, Any, Optional, List
+from app.orchestration.graph import workflow
+from app.data.symbol_resolver import resolve_symbol, search_symbols
+from starlette.concurrency import run_in_threadpool
+
+router = APIRouter()
+
+class AnalyzeRequest(BaseModel):
+    symbol: str
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+
+class AnalyzeResponse(BaseModel):
+    symbol: str
+    resolved_symbol: str
+    final_decision: Dict[str, Any]
+    risk_metrics: Optional[Dict[str, Any]]
+    sentiment_scores: Optional[Dict[str, Any]]
+    is_demo_mode: bool = False
+
+class SymbolSuggestion(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    type: str
+    logo_url: str = ""
+
+@router.get("/search", response_model=List[SymbolSuggestion])
+async def search_stock_symbols(q: str = Query(..., min_length=1, description="Company name or partial ticker")):
+    """
+    Search for stock symbols by company name or ticker (used for autocomplete).
+    """
+    try:
+        results = await run_in_threadpool(search_symbols, q)
+        return results
+    except Exception as e:
+        print(f"Symbol search error: {e}")
+        return []
+
+@router.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_stock(request: AnalyzeRequest):
+    """
+    Run the full LangGraph orchestration pipeline for a given stock symbol.
+    Accepts company names, typos, or exact tickers — resolves to the correct symbol automatically.
+    """
+    try:
+        raw_input = request.symbol.strip()
+        
+        # Resolve company name / typo → actual ticker symbol
+        resolved = await run_in_threadpool(resolve_symbol, raw_input)
+        if not resolved:
+            raise ValueError(
+                f"Could not find a stock symbol for '{raw_input}'. "
+                f"Try a specific ticker like 'RELIANCE.NS', 'AAPL', or 'TCS.NS'."
+            )
+
+        initial_state = {
+            "symbol": resolved,
+            "provider": request.provider,
+            "api_key": request.api_key
+        }
+        # Invoke the graph in a threadpool so it doesn't block the event loop
+        result = await run_in_threadpool(workflow.invoke, initial_state)
+        
+        final_decision = result.get("final_decision", {})
+        final_decision["quant_analysis"] = result.get("quant_analysis")
+        final_decision["fundamental_analysis"] = result.get("fundamental_analysis")
+        final_decision["sentiment_analysis"] = result.get("sentiment_analysis")
+        final_decision["risk_analysis"] = result.get("risk_analysis")
+
+        news_data = result.get("news_data", [])
+        is_demo = False
+        if news_data and isinstance(news_data, list):
+            if news_data[0].get("source") == "Demo Dataset":
+                is_demo = True
+
+        return AnalyzeResponse(
+            symbol=raw_input,          # original user input
+            resolved_symbol=resolved,  # what was actually analyzed
+            final_decision=final_decision,
+            risk_metrics=result.get("risk_metrics"),
+            sentiment_scores=result.get("sentiment_scores"),
+            is_demo_mode=is_demo
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        print(f"Server Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during analysis.")
+</file>
+
+<file path="backend/app/data/__init__.py">
+# init
+</file>
+
+<file path="backend/app/data/market_data.py">
+import yfinance as yf
+import pandas as pd
+from typing import Dict, Any, Optional
+
+class MarketDataAdapter:
+    @staticmethod
+    def get_historical_data(symbol: str, period: str = "1y", interval: str = "1d") -> Optional[pd.DataFrame]:
+        """
+        Fetch historical OHLCV data for a given symbol (e.g., 'RELIANCE.NS').
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=period, interval=interval)
+            if df.empty:
+                return None
+            return df
+        except Exception as e:
+            print(f"Error fetching historical data for {symbol}: {e}")
+            return None
+
+    @staticmethod
+    def get_fundamentals(symbol: str) -> Dict[str, Any]:
+        """
+        Fetch fundamental data for a given symbol.
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            return {
+                "symbol": symbol,
+                "marketCap": info.get("marketCap"),
+                "trailingPE": info.get("trailingPE"),
+                "forwardPE": info.get("forwardPE"),
+                "priceToBook": info.get("priceToBook"),
+                "debtToEquity": info.get("debtToEquity"),
+                "freeCashflow": info.get("freeCashflow"),
+                "operatingMargins": info.get("operatingMargins"),
+                "returnOnEquity": info.get("returnOnEquity"),
+                "dividendYield": info.get("dividendYield"),
+            }
+        except Exception as e:
+            print(f"Error fetching fundamental data for {symbol}: {e}")
+            return {}
+</file>
+
+<file path="backend/app/data/news_data.py">
+from duckduckgo_search import DDGS
+from typing import List, Dict, Any
+import datetime
+
+class NewsDataAdapter:
+    @staticmethod
+    def get_company_news(company_name: str, max_results: int = 10, demo_mode: bool = False) -> List[Dict[str, Any]]:
+        """
+        Fetch financial news for a given company name.
+        """
+        if demo_mode:
+            return NewsDataAdapter._get_demo_data(company_name)
+            
+        try:
+            with DDGS() as ddgs:
+                # Search for recent news using DuckDuckGo
+                query = f"{company_name} stock financial news"
+                # Evaluate generator to list
+                results = list(ddgs.text(query, max_results=max_results))
+                
+                if not results:
+                    print(f"No live results for {company_name}. Falling back to demo mode.")
+                    return NewsDataAdapter._get_demo_data(company_name)
+                    
+                formatted_news = []
+                for result in results:
+                    formatted_news.append({
+                        "headline": result.get("title", ""),
+                        "source": "DuckDuckGo Search",
+                        "url": result.get("href", ""),
+                        "summary": result.get("body", ""),
+                        "publication_time": datetime.datetime.now().isoformat()
+                    })
+                return formatted_news
+        except Exception as e:
+            print(f"Error fetching news for {company_name}: {e}. Falling back to demo mode.")
+            return NewsDataAdapter._get_demo_data(company_name)
+
+    @staticmethod
+    def _get_demo_data(company_name: str) -> List[Dict[str, Any]]:
+        return [{
+            "headline": f"[DEMO MODE] {company_name} quarterly update shows resilience",
+            "source": "Demo Dataset",
+            "url": "https://demo.investiq.local/news",
+            "summary": f"This is mock demo data for {company_name} due to API unavailability.",
+            "publication_time": datetime.datetime.now().isoformat()
+        }]
+</file>
+
+<file path="backend/app/data/symbol_resolver.py">
+import yfinance as yf
+from typing import Optional, List, Dict, Any
+import re
+
+# Maps ticker → company website domain (for Clearbit logo API)
+TICKER_DOMAINS: Dict[str, str] = {
+    # Indian stocks
+    "RELIANCE.NS": "relianceindustries.com",
+    "TCS.NS": "tcs.com",
+    "INFY.NS": "infosys.com",
+    "WIPRO.NS": "wipro.com",
+    "HDFCBANK.NS": "hdfcbank.com",
+    "ICICIBANK.NS": "icicibank.com",
+    "M&M.NS": "mahindra.com",
+    "TATAMOTORS.NS": "tatamotors.com",
+    "BAJFINANCE.NS": "bajajfinserv.in",
+    "BHARTIARTL.NS": "airtel.in",
+    "SBIN.NS": "sbi.co.in",
+    "KOTAKBANK.NS": "kotak.com",
+    "AXISBANK.NS": "axisbank.com",
+    "HCLTECH.NS": "hcltech.com",
+    "SUNPHARMA.NS": "sunpharma.com",
+    "ONGC.NS": "ongcindia.com",
+    "MARUTI.NS": "marutisuzuki.com",
+    "LT.NS": "larsentoubro.com",
+    "ASIANPAINT.NS": "asianpaints.com",
+    "TITAN.NS": "titanworld.com",
+    "NESTLEIND.NS": "nestle.in",
+    "ITC.NS": "itcportal.com",
+    "NTPC.NS": "ntpc.co.in",
+    "ADANIENT.NS": "adani.com",
+    "ADANIPORTS.NS": "adaniports.com",
+    "ZOMATO.NS": "zomato.com",
+    "NYKAA.NS": "nykaa.com",
+    "DMART.NS": "dmartindia.com",
+    # US stocks
+    "AAPL": "apple.com",
+    "MSFT": "microsoft.com",
+    "GOOGL": "google.com",
+    "GOOG": "google.com",
+    "AMZN": "amazon.com",
+    "TSLA": "tesla.com",
+    "META": "meta.com",
+    "NVDA": "nvidia.com",
+    "NFLX": "netflix.com",
+    "BRK-B": "berkshirehathaway.com",
+    "JPM": "jpmorganchase.com",
+    "V": "visa.com",
+    "MA": "mastercard.com",
+    "JNJ": "jnj.com",
+    "WMT": "walmart.com",
+    "XOM": "exxonmobil.com",
+    "UNH": "unitedhealthgroup.com",
+    "PG": "pg.com",
+    "HD": "homedepot.com",
+    "BAC": "bankofamerica.com",
+    "CVX": "chevron.com",
+    "LLY": "lilly.com",
+    "AVGO": "broadcom.com",
+    "ADBE": "adobe.com",
+    "CRM": "salesforce.com",
+    "AMD": "amd.com",
+    "INTC": "intel.com",
+    "QCOM": "qualcomm.com",
+    "PYPL": "paypal.com",
+    "DIS": "thewaltdisneycompany.com",
+    "KO": "coca-cola.com",
+    "PEP": "pepsico.com",
+    "SBUX": "starbucks.com",
+    "MCD": "mcdonalds.com",
+    "NKE": "nike.com",
+    "UBER": "uber.com",
+    "ABNB": "airbnb.com",
+    "SPOT": "spotify.com",
+    "SNAP": "snap.com",
+    "ORCL": "oracle.com",
+    "IBM": "ibm.com",
+    "CSCO": "cisco.com",
+    "VZ": "verizon.com",
+    "T": "att.com",
+    "GS": "goldmansachs.com",
+    "MS": "morganstanley.com",
+    "GE": "ge.com",
+    "BA": "boeing.com",
+    "CAT": "caterpillar.com",
+    "MMM": "3m.com",
+}
+
+# Maps ticker → canonical display name (used in autocomplete)
+TICKER_NAMES: Dict[str, str] = {
+    "RELIANCE.NS": "Reliance Industries",
+    "TCS.NS": "Tata Consultancy Services",
+    "INFY.NS": "Infosys",
+    "WIPRO.NS": "Wipro",
+    "HDFCBANK.NS": "HDFC Bank",
+    "ICICIBANK.NS": "ICICI Bank",
+    "M&M.NS": "Mahindra & Mahindra",
+    "TATAMOTORS.NS": "Tata Motors",
+    "BAJFINANCE.NS": "Bajaj Finance",
+    "BHARTIARTL.NS": "Bharti Airtel",
+    "SBIN.NS": "State Bank of India",
+    "KOTAKBANK.NS": "Kotak Mahindra Bank",
+    "AXISBANK.NS": "Axis Bank",
+    "HCLTECH.NS": "HCL Technologies",
+    "SUNPHARMA.NS": "Sun Pharmaceutical",
+    "ONGC.NS": "ONGC",
+    "MARUTI.NS": "Maruti Suzuki",
+    "LT.NS": "Larsen & Toubro",
+    "ASIANPAINT.NS": "Asian Paints",
+    "TITAN.NS": "Titan Company",
+    "NESTLEIND.NS": "Nestle India",
+    "ITC.NS": "ITC",
+    "POWERGRID.NS": "Power Grid",
+    "NTPC.NS": "NTPC",
+    "ADANIENT.NS": "Adani Enterprises",
+    "ADANIPORTS.NS": "Adani Ports",
+    "ZOMATO.NS": "Zomato",
+    "PAYTM.NS": "Paytm",
+    "NYKAA.NS": "Nykaa",
+    "DMART.NS": "Avenue Supermarts (DMart)",
+    "AAPL": "Apple Inc.",
+    "MSFT": "Microsoft",
+    "GOOGL": "Alphabet (Google)",
+    "AMZN": "Amazon",
+    "TSLA": "Tesla",
+    "META": "Meta Platforms",
+    "NVDA": "NVIDIA",
+    "NFLX": "Netflix",
+    "BRK-B": "Berkshire Hathaway",
+    "JPM": "JPMorgan Chase",
+    "V": "Visa",
+    "MA": "Mastercard",
+    "JNJ": "Johnson & Johnson",
+    "WMT": "Walmart",
+    "XOM": "ExxonMobil",
+    "UNH": "UnitedHealth Group",
+    "PG": "Procter & Gamble",
+    "HD": "Home Depot",
+    "BAC": "Bank of America",
+    "CVX": "Chevron",
+    "LLY": "Eli Lilly",
+    "AVGO": "Broadcom",
+    "ADBE": "Adobe",
+    "CRM": "Salesforce",
+    "AMD": "Advanced Micro Devices",
+    "INTC": "Intel",
+    "QCOM": "Qualcomm",
+    "PYPL": "PayPal",
+    "DIS": "Walt Disney",
+    "KO": "Coca-Cola",
+    "PEP": "PepsiCo",
+    "SBUX": "Starbucks",
+    "MCD": "McDonald's",
+    "NKE": "Nike",
+    "UBER": "Uber",
+    "ABNB": "Airbnb",
+    "SPOT": "Spotify",
+    "SNAP": "Snap",
+}
+
+import urllib.parse
+
+def get_logo_url(symbol: str) -> str:
+    """
+    Return the logo URL for the given ticker.
+    For NSE/BSE stocks, it uses the 'indian-listed-company-logos' GitHub repo via jsDelivr.
+    For other global stocks, it uses Google S2 Favicons based on domain mapping.
+    Falls back to empty string if domain unknown (frontend will show letter avatar).
+    """
+    if symbol.endswith(".NS"):
+        base_ticker = urllib.parse.quote(symbol[:-3])
+        return f"https://cdn.jsdelivr.net/gh/dharunashokkumar/indian-listed-company-logos@main/nse/NSE_{base_ticker}.svg"
+    elif symbol.endswith(".BO"):
+        base_ticker = urllib.parse.quote(symbol[:-3])
+        return f"https://cdn.jsdelivr.net/gh/dharunashokkumar/indian-listed-company-logos@main/bse/BSE_{base_ticker}.svg"
+    
+    domain = TICKER_DOMAINS.get(symbol, "")
+    if domain:
+        return f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+    return ""
+
+# Common company name → ticker mappings for popular stocks (handles typos/aliases)
+KNOWN_ALIASES: Dict[str, str] = {
+    # Indian stocks
+    "reliance": "RELIANCE.NS",
+    "reliance industries": "RELIANCE.NS",
+    "tcs": "TCS.NS",
+    "tata consultancy": "TCS.NS",
+    "tata consultancy services": "TCS.NS",
+    "infosys": "INFY.NS",
+    "infy": "INFY.NS",
+    "wipro": "WIPRO.NS",
+    "hdfc": "HDFCBANK.NS",
+    "hdfc bank": "HDFCBANK.NS",
+    "icici": "ICICIBANK.NS",
+    "icici bank": "ICICIBANK.NS",
+    "mahindra": "M&M.NS",
+    "m&m": "M&M.NS",
+    "mahindra and mahindra": "M&M.NS",
+    "mahindra & mahindra": "M&M.NS",
+    "tata motors": "TATAMOTORS.NS",
+    "tatamotors": "TATAMOTORS.NS",
+    "bajaj": "BAJFINANCE.NS",
+    "bajaj finance": "BAJFINANCE.NS",
+    "bharti airtel": "BHARTIARTL.NS",
+    "airtel": "BHARTIARTL.NS",
+    "sbi": "SBIN.NS",
+    "state bank": "SBIN.NS",
+    "state bank of india": "SBIN.NS",
+    "kotak": "KOTAKBANK.NS",
+    "kotak mahindra": "KOTAKBANK.NS",
+    "kotak bank": "KOTAKBANK.NS",
+    "axis bank": "AXISBANK.NS",
+    "axis": "AXISBANK.NS",
+    "hcl": "HCLTECH.NS",
+    "hcl tech": "HCLTECH.NS",
+    "hcl technologies": "HCLTECH.NS",
+    "sun pharma": "SUNPHARMA.NS",
+    "sun pharmaceutical": "SUNPHARMA.NS",
+    "ongc": "ONGC.NS",
+    "maruti": "MARUTI.NS",
+    "maruti suzuki": "MARUTI.NS",
+    "larsen": "LT.NS",
+    "l&t": "LT.NS",
+    "larsen and toubro": "LT.NS",
+    "larsen & toubro": "LT.NS",
+    "asian paints": "ASIANPAINT.NS",
+    "titan": "TITAN.NS",
+    "nestle": "NESTLEIND.NS",
+    "nestle india": "NESTLEIND.NS",
+    "itc": "ITC.NS",
+    "power grid": "POWERGRID.NS",
+    "ntpc": "NTPC.NS",
+    "adani": "ADANIENT.NS",
+    "adani enterprises": "ADANIENT.NS",
+    "adani ports": "ADANIPORTS.NS",
+    "zomato": "ZOMATO.NS",
+    "paytm": "PAYTM.NS",
+    "nykaa": "NYKAA.NS",
+    "dmart": "DMART.NS",
+    "avenue supermarts": "DMART.NS",
+    # US stocks
+    "apple": "AAPL",
+    "microsoft": "MSFT",
+    "google": "GOOGL",
+    "alphabet": "GOOGL",
+    "amazon": "AMZN",
+    "tesla": "TSLA",
+    "meta": "META",
+    "facebook": "META",
+    "nvidia": "NVDA",
+    "nvda": "NVDA",
+    "netflix": "NFLX",
+    "berkshire": "BRK-B",
+    "berkshire hathaway": "BRK-B",
+    "jpmorgan": "JPM",
+    "jp morgan": "JPM",
+    "visa": "V",
+    "mastercard": "MA",
+    "johnson & johnson": "JNJ",
+    "johnson and johnson": "JNJ",
+    "walmart": "WMT",
+    "exxon": "XOM",
+    "exxon mobil": "XOM",
+    "unitedhealth": "UNH",
+    "procter": "PG",
+    "procter & gamble": "PG",
+    "home depot": "HD",
+    "bank of america": "BAC",
+    "chevron": "CVX",
+    "eli lilly": "LLY",
+    "broadcom": "AVGO",
+    "adobe": "ADBE",
+    "salesforce": "CRM",
+    "amd": "AMD",
+    "advanced micro devices": "AMD",
+    "intel": "INTC",
+    "qualcomm": "QCOM",
+    "paypal": "PYPL",
+    "disney": "DIS",
+    "coca cola": "KO",
+    "pepsi": "PEP",
+    "pepsico": "PEP",
+    "starbucks": "SBUX",
+    "mcdonalds": "MCD",
+    "mcdonald's": "MCD",
+    "nike": "NKE",
+    "uber": "UBER",
+    "airbnb": "ABNB",
+    "spotify": "SPOT",
+    "twitter": "X",
+    "snap": "SNAP",
+}
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, strip, and collapse whitespace."""
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def resolve_symbol(query: str) -> Optional[str]:
+    """
+    Given a user query (company name, partial name, typo, or actual ticker),
+    return the best-matching yfinance ticker symbol.
+    
+    Resolution order:
+    1. If it already looks like a valid ticker (has data), return as-is
+    2. Check the known aliases dictionary
+    3. Use yfinance search API to find the best match
+    """
+    if not query or not query.strip():
+        return None
+
+    query = query.strip()
+    
+    # Step 1: Try as-is (it might already be a valid ticker like "RELIANCE.NS")
+    try:
+        ticker = yf.Ticker(query.upper())
+        hist = ticker.history(period="5d")
+        if not hist.empty:
+            return query.upper()
+    except Exception:
+        pass
+
+    # Step 2: Check known aliases (handles "mahindra", "nvidia", etc.)
+    normalized = _normalize(query)
+    if normalized in KNOWN_ALIASES:
+        return KNOWN_ALIASES[normalized]
+
+    # Step 3: Use yfinance search API
+    try:
+        search_results = yf.Search(query, max_results=5)
+        quotes = search_results.quotes
+        if quotes:
+            # Prefer equities; fall back to first result
+            for q in quotes:
+                if q.get("typeDisp", "").lower() in ("equity", "etf"):
+                    return q["symbol"]
+            return quotes[0].get("symbol")
+    except Exception as e:
+        print(f"[SymbolResolver] yfinance search failed for '{query}': {e}")
+
+    return None
+
+
+def search_symbols(query: str, max_results: int = 8) -> List[Dict[str, Any]]:
+    """
+    Return a list of matching symbol suggestions for autocomplete.
+    Each result contains: symbol, name, exchange, type, logo_url.
+    """
+    if not query or len(query.strip()) < 1:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen_tickers: set = set()  # deduplicate by ticker symbol
+
+    def _make_entry(symbol: str, name: str, exchange: str, type_: str) -> Dict[str, Any]:
+        # Use canonical name if available, else supplied name
+        display_name = TICKER_NAMES.get(symbol, name)
+        # Clearbit logo via domain mapping; empty string = frontend shows letter avatar
+        logo = get_logo_url(symbol)
+        return {
+            "symbol": symbol,
+            "name": display_name,
+            "exchange": exchange,
+            "type": type_,
+            "logo_url": logo,
+        }
+
+    # Check aliases first for instant suggestions
+    normalized = _normalize(query)
+    for alias, ticker in KNOWN_ALIASES.items():
+        if ticker in seen_tickers:
+            continue  # skip duplicate tickers
+        if normalized in alias or alias.startswith(normalized):
+            exchange = "NSE" if ticker.endswith(".NS") else "BSE" if ticker.endswith(".BO") else "NASDAQ/NYSE"
+            results.append(_make_entry(ticker, alias.title(), exchange, "Equity"))
+            seen_tickers.add(ticker)
+            if len(results) >= max_results:
+                break
+
+    # Supplement with yfinance search
+    try:
+        search = yf.Search(query, max_results=max_results)
+        quotes = search.quotes
+        for q in quotes:
+            sym = q.get("symbol", "")
+            if not sym or sym in seen_tickers:
+                continue
+            name = q.get("longname") or q.get("shortname", sym)
+            exchange = q.get("exchDisp") or q.get("exchange", "")
+            type_ = q.get("typeDisp", "Equity")
+            results.append(_make_entry(sym, name, exchange, type_))
+            seen_tickers.add(sym)
+            if len(results) >= max_results:
+                break
+    except Exception as e:
+        print(f"[SymbolResolver] search_symbols failed for '{query}': {e}")
+
+    return results[:max_results]
+</file>
+
+<file path="backend/app/orchestration/__init__.py">
+from .graph import workflow
+</file>
+
+<file path="backend/app/orchestration/graph.py">
+from langgraph.graph import StateGraph, START, END
+from app.agents.state import AgentState
+from app.agents.quantitative import quant_agent
+from app.agents.fundamental import fundamental_agent
+from app.agents.sentiment import sentiment_agent
+from app.agents.risk import risk_agent
+from app.agents.meta import meta_agent
+from app.data.market_data import MarketDataAdapter
+from app.data.news_data import NewsDataAdapter
+from app.risk.engine import RiskEngine
+from app.quantitative.indicators import QuantitativeEngine
+from app.sentiment.engine import SentimentEngine
+
+# Lazy load sentiment engine
+_sentiment_engine = None
+
+def get_sentiment_engine():
+    global _sentiment_engine
+    if _sentiment_engine is None:
+        _sentiment_engine = SentimentEngine()
+    return _sentiment_engine
+
+def ingest_data_node(state: AgentState) -> dict:
+    symbol = state.get("symbol")
+    
+    # 1. Fetch Data
+    historical_df = MarketDataAdapter.get_historical_data(symbol)
+    if historical_df is None or historical_df.empty:
+        raise ValueError(f"No market data found for symbol: {symbol}")
+        
+    fundamentals = MarketDataAdapter.get_fundamentals(symbol)
+    news = NewsDataAdapter.get_company_news(symbol)
+    
+    # 2. Run Engines
+    risk_metrics = RiskEngine.calculate_metrics(historical_df)
+    
+    # Quant indicators and signals
+    quant_df = QuantitativeEngine.calculate_indicators(historical_df)
+    quant_signals = QuantitativeEngine.generate_signals(quant_df)
+    
+    # Sentiment analysis
+    engine = get_sentiment_engine()
+    news_sentiment = engine.analyze_news(news)
+    aggregate_sentiment = engine.get_aggregate_sentiment(news_sentiment)
+    
+    return {
+        "market_data": None, # Removed historical_df.to_dict() to prevent state bloat
+        "news_data": news,
+        "fundamentals": fundamentals,
+        "risk_metrics": risk_metrics,
+        "quant_indicators": quant_signals,
+        "sentiment_scores": aggregate_sentiment
+    }
+
+def build_graph():
+    builder = StateGraph(AgentState)
+    
+    # Add nodes
+    builder.add_node("ingest", ingest_data_node)
+    builder.add_node("quant", quant_agent)
+    builder.add_node("fundamental", fundamental_agent)
+    builder.add_node("sentiment", sentiment_agent)
+    builder.add_node("risk", risk_agent)
+    builder.add_node("meta", meta_agent)
+    
+    # Define edges (Sequential for simplicity)
+    builder.add_edge(START, "ingest")
+    builder.add_edge("ingest", "quant")
+    builder.add_edge("quant", "fundamental")
+    builder.add_edge("fundamental", "sentiment")
+    builder.add_edge("sentiment", "risk")
+    builder.add_edge("risk", "meta")
+    builder.add_edge("meta", END)
+    
+    # Compile graph
+    return builder.compile()
+
+# Global graph instance
+workflow = build_graph()
+</file>
+
+<file path="backend/app/quantitative/__init__.py">
+from .indicators import QuantitativeEngine
+</file>
+
+<file path="backend/app/quantitative/indicators.py">
+import pandas as pd
+
+class QuantitativeEngine:
+    @staticmethod
+    def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate technical indicators from historical OHLCV data.
+        Adds SMA, EMA, RSI, MACD to the dataframe.
+        """
+        if df is None or df.empty or 'Close' not in df:
+            return df
+            
+        result = df.copy()
+        close = result['Close']
+        
+        # Moving Averages
+        result['SMA_20'] = close.rolling(window=20).mean()
+        result['SMA_50'] = close.rolling(window=50).mean()
+        result['EMA_20'] = close.ewm(span=20, adjust=False).mean()
+        
+        # RSI (Relative Strength Index) using Wilder's Smoothing
+        delta = close.diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        rs = avg_gain / avg_loss
+        result['RSI_14'] = 100 - (100 / (1 + rs))
+        
+        # MACD (Moving Average Convergence Divergence)
+        ema_12 = close.ewm(span=12, adjust=False).mean()
+        ema_26 = close.ewm(span=26, adjust=False).mean()
+        result['MACD'] = ema_12 - ema_26
+        result['MACD_Signal'] = result['MACD'].ewm(span=9, adjust=False).mean()
+        
+        return result
+
+    @staticmethod
+    def generate_signals(df: pd.DataFrame) -> dict:
+        """
+        Generate simple quant signals based on current indicators.
+        """
+        if df is None or df.empty:
+            return {"signal": "NEUTRAL", "reason": "No data"}
+            
+        latest = df.iloc[-1]
+        
+        bullish_signals = 0
+        bearish_signals = 0
+        reasons = []
+        
+        # RSI Check
+        if pd.notna(latest.get('RSI_14')):
+            if latest['RSI_14'] < 30:
+                bullish_signals += 1
+                reasons.append("RSI indicates oversold (<30)")
+            elif latest['RSI_14'] > 70:
+                bearish_signals += 1
+                reasons.append("RSI indicates overbought (>70)")
+                
+        # MACD Check
+        if pd.notna(latest.get('MACD')) and pd.notna(latest.get('MACD_Signal')):
+            if latest['MACD'] > latest['MACD_Signal']:
+                bullish_signals += 1
+                reasons.append("MACD is above signal line")
+            else:
+                bearish_signals += 1
+                reasons.append("MACD is below signal line")
+                
+        # Moving Average Crossover
+        if pd.notna(latest.get('SMA_20')) and pd.notna(latest.get('SMA_50')):
+            if latest['SMA_20'] > latest['SMA_50']:
+                bullish_signals += 1
+                reasons.append("Short-term SMA is above long-term SMA (Bullish Trend)")
+            else:
+                bearish_signals += 1
+                reasons.append("Short-term SMA is below long-term SMA (Bearish Trend)")
+                
+        if bullish_signals > bearish_signals:
+            signal = "BUY"
+        elif bearish_signals > bullish_signals:
+            signal = "SELL"
+        else:
+            signal = "HOLD"
+            reasons.append("Mixed signals, holding neutral.")
+            
+        return {
+            "signal": signal,
+            "reasons": reasons,
+            "bullish_count": bullish_signals,
+            "bearish_count": bearish_signals
+        }
+</file>
+
+<file path="backend/app/risk/__init__.py">
+from .engine import RiskEngine
+</file>
+
+<file path="backend/app/risk/engine.py">
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+
+class RiskEngine:
+    @staticmethod
+    def calculate_metrics(df: pd.DataFrame) -> dict:
+        """
+        Calculate risk metrics from historical OHLCV data.
+        Returns volatility and 95% Value at Risk (VaR).
+        """
+        if df is None or df.empty or 'Close' not in df:
+            return {"volatility_annualized": None, "historical_var_95": None, "parametric_var_95": None, "max_drawdown": None}
+            
+        # Calculate daily returns
+        returns = df['Close'].pct_change().dropna()
+        
+        if returns.empty:
+            return {"volatility_annualized": None, "historical_var_95": None, "parametric_var_95": None, "max_drawdown": None}
+            
+        # Annualized Volatility (assuming 252 trading days)
+        volatility = returns.std() * np.sqrt(252)
+        
+        # 95% Historical VaR
+        # Represents the maximum expected loss at 95% confidence over 1 day
+        var_95 = np.percentile(returns, 5)
+        
+        # 95% Parametric VaR (optional, using normal distribution)
+        mean_return = returns.mean()
+        std_return = returns.std()
+        parametric_var_95 = stats.norm.ppf(0.05, mean_return, std_return)
+        
+        return {
+            "volatility_annualized": float(volatility),
+            "historical_var_95": float(var_95),
+            "parametric_var_95": float(parametric_var_95),
+            "max_drawdown": float(RiskEngine.calculate_max_drawdown(df['Close']))
+        }
+        
+    @staticmethod
+    def calculate_max_drawdown(prices: pd.Series) -> float:
+        """Calculate the maximum drawdown."""
+        rolling_max = prices.cummax()
+        drawdown = prices / rolling_max - 1.0
+        return drawdown.min()
+</file>
+
+<file path="backend/app/sentiment/__init__.py">
+from .engine import SentimentEngine
+</file>
+
+<file path="backend/app/sentiment/engine.py">
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+from typing import List, Dict, Any
+
+class SentimentEngine:
+    def __init__(self, model_name: str = "ProsusAI/finbert"):
+        """
+        Initialize the FinBERT sentiment analysis pipeline.
+        This downloads the model on first run if not cached locally.
+        """
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            self.nlp = pipeline("sentiment-analysis", model=self.model, tokenizer=self.tokenizer)
+        except Exception as e:
+            print(f"Error loading sentiment model: {e}")
+            self.nlp = None
+
+    def analyze_news(self, news_articles: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """
+        Analyze a list of news articles.
+        Expects a list of dicts with a 'title' or 'summary' key.
+        """
+        if not self.nlp or not news_articles:
+            return []
+
+        results = []
+        for article in news_articles:
+            text = article.get('headline', '') + " " + article.get('summary', '')
+            text = text.strip()
+            
+            if not text:
+                continue
+                
+            # FinBERT has max length limits; chunking might be needed for very long texts, 
+            # but usually financial news headlines/summaries fit within 512 tokens.
+            try:
+                sentiment = self.nlp(text[:2000])[0] # Taking first ~2000 chars to be safe
+                results.append({
+                    "article": article,
+                    "sentiment_label": sentiment['label'], # positive, negative, or neutral
+                    "sentiment_score": sentiment['score']
+                })
+            except Exception as e:
+                print(f"Error analyzing article: {e}")
+                
+        return results
+
+    def get_aggregate_sentiment(self, sentiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Calculate aggregate sentiment from a list of analyzed articles.
+        """
+        if not sentiment_results:
+            return {"overall_sentiment": "NEUTRAL", "confidence": 0.0, "positive_count": 0, "negative_count": 0, "neutral_count": 0}
+
+        counts = {"positive": 0, "negative": 0, "neutral": 0}
+        total_score = 0
+        
+        for res in sentiment_results:
+            label = res['sentiment_label']
+            if label in counts:
+                counts[label] += 1
+            total_score += res['sentiment_score']
+
+        avg_confidence = total_score / len(sentiment_results)
+        
+        if counts["positive"] > counts["negative"] and counts["positive"] >= counts["neutral"]:
+            overall = "POSITIVE"
+        elif counts["negative"] > counts["positive"] and counts["negative"] >= counts["neutral"]:
+            overall = "NEGATIVE"
+        else:
+            overall = "NEUTRAL"
+            
+        return {
+            "overall_sentiment": overall,
+            "confidence": avg_confidence,
+            "positive_count": counts["positive"],
+            "negative_count": counts["negative"],
+            "neutral_count": counts["neutral"]
+        }
+</file>
+
+<file path="backend/app/__init__.py">
+# init
+</file>
+
+<file path="backend/app/main.py">
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.endpoints import router as api_router
+
+app = FastAPI(
+    title="InvestIQ API",
+    description="Autonomous multi-agent financial consensus API",
+    version="1.0.0"
+)
+
+# Configure CORS for frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Vite dev servers
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router, prefix="/api")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+</file>
+
+<file path="backend/tests/__init__.py">
+# init
+</file>
+
+<file path="backend/tests/test_data.py">
+import pytest
+from app.data.market_data import MarketDataAdapter
+from app.data.news_data import NewsDataAdapter
+
+def test_get_historical_data():
+    df = MarketDataAdapter.get_historical_data("RELIANCE.NS", period="1mo")
+    assert df is not None
+    assert not df.empty
+    assert "Close" in df.columns
+
+def test_get_fundamentals():
+    fundamentals = MarketDataAdapter.get_fundamentals("RELIANCE.NS")
+    assert fundamentals is not None
+    assert fundamentals.get("symbol") == "RELIANCE.NS"
+    assert "marketCap" in fundamentals
+
+def test_get_company_news():
+    news = NewsDataAdapter.get_company_news("Reliance Industries", max_results=2)
+    assert len(news) > 0
+    assert "headline" in news[0]
+    assert "url" in news[0]
+</file>
+
+<file path="backend/.env.example">
+# Provide AT LEAST ONE of the following API keys.
+# The system will use the first one it finds in this order: OpenAI > Anthropic > Gemini > Groq
+GEMINI_API_KEY="your-gemini-api-key"
+# OPENAI_API_KEY="your-openai-api-key"
+# ANTHROPIC_API_KEY="your-anthropic-api-key"
+# GROQ_API_KEY="your-groq-api-key"
+
+FINBERT_MODEL=ProsusAI/finbert
+DB_URL=sqlite:///./investiq.db
+</file>
+
+<file path="backend/requirements.txt">
+fastapi
+uvicorn
+yfinance
+duckduckgo-search
+pandas
+numpy
+scipy
+transformers
+torch
+langgraph
+langchain
+langchain-groq
+pydantic
+python-dotenv
+pytest
+</file>
+
+<file path="docs/reference-repository-differences.md">
+# Reference Repository Differences
+
+This document explains how InvestIQ differs from the reference repository (https://github.com/ankitakulkarnigit/finance-intelligence-agent).
+
+## Architecture Differences
+* **Frontend:** The reference repository uses a Streamlit frontend. InvestIQ requires a fully-fledged professional React + TypeScript frontend.
+* **Backend:** InvestIQ enforces a strict separation of concerns with a dedicated FastAPI REST backend that runs independently.
+* **Agent Roles:** 
+  * Reference: Research, Analysis, Sentiment, Prediction, and Report agents.
+  * InvestIQ: Quantitative, Fundamental, Sentiment, Risk specialist agents, orchestrated by a Meta-Agent.
+* **Risk Engine:** InvestIQ requires a deterministic Python-based risk engine (calculating Volatility and 95% VaR) that the LLM interprets, rather than delegating calculations to the LLM.
+* **Predictive ML:** The reference repo centers on a generic explicit ML price prediction feature, whereas InvestIQ centers on explainable financial decision support (BUY/HOLD/SELL) via consensus.
+* **Orchestration:** InvestIQ requires explicit multi-agent deliberation via a state graph (e.g., LangGraph), focusing on consensus and conflict resolution.
+</file>
+
+<file path="docs/requirements-traceability.md">
+# Requirements Traceability
+
+| Requirement | Source | File/Module | API | Frontend Screen |
+|---|---|---|---|---|
+| Professional React + TS frontend | AI Build Prompt | `frontend/` | N/A | All |
+| FastAPI REST backend | AI Build Prompt | `backend/app/api/` | All | N/A |
+| Ingest OHLCV/Fundamentals (yfinance) | AI Build Prompt | `backend/app/data/` | `/stocks/` | Dashboard |
+| Ingest News (DuckDuckGo) | AI Build Prompt | `backend/app/data/` | `/stocks/{symbol}/news` | News/Sentiment |
+| Deterministic Risk Engine | AI Build Prompt | `backend/app/risk/` | `/analysis/{id}/risk` | Risk Dashboard |
+| FinBERT Sentiment Engine | AI Build Prompt | `backend/app/sentiment/` | `/stocks/{symbol}/news` | News/Sentiment |
+| Quant Agent | AI Build Prompt | `backend/app/agents/quantitative.py` | `/analysis/` | Multi-Agent View |
+| Fundamental Agent | AI Build Prompt | `backend/app/agents/fundamental.py` | `/analysis/` | Multi-Agent View |
+| Sentiment Agent | AI Build Prompt | `backend/app/agents/sentiment.py` | `/analysis/` | Multi-Agent View |
+| Risk Agent | AI Build Prompt | `backend/app/agents/risk.py` | `/analysis/` | Multi-Agent View |
+| Meta-Agent | AI Build Prompt | `backend/app/agents/meta.py` | `/analysis/` | Analysis Result |
+| State-based Orchestration | AI Build Prompt | `backend/app/orchestration/` | `/analysis/` | N/A |
+</file>
+
+<file path="frontend/public/favicon.svg">
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="46" fill="none" viewBox="0 0 48 46"><path fill="#863bff" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z" style="fill:#863bff;fill:color(display-p3 .5252 .23 1);fill-opacity:1"/><mask id="a" width="48" height="46" x="0" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha"><path fill="#000" d="M25.842 44.938c-.664.844-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.183c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.498 0-3.579-1.842-3.579H1.133c-.92 0-1.456-1.04-.92-1.787L9.91.473c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.578 1.842 3.578h11.377c.943 0 1.473 1.088.89 1.832L25.843 44.94z" style="fill:#000;fill-opacity:1"/></mask><g mask="url(#a)"><g filter="url(#b)"><ellipse cx="5.508" cy="14.704" fill="#ede6ff" rx="5.508" ry="14.704" style="fill:#ede6ff;fill:color(display-p3 .9275 .9033 1);fill-opacity:1" transform="matrix(.00324 1 1 -.00324 -4.47 31.516)"/></g><g filter="url(#c)"><ellipse cx="10.399" cy="29.851" fill="#ede6ff" rx="10.399" ry="29.851" style="fill:#ede6ff;fill:color(display-p3 .9275 .9033 1);fill-opacity:1" transform="matrix(.00324 1 1 -.00324 -39.328 7.883)"/></g><g filter="url(#d)"><ellipse cx="5.508" cy="30.487" fill="#7e14ff" rx="5.508" ry="30.487" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(89.814 -25.913 -14.639)scale(1 -1)"/></g><g filter="url(#e)"><ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(89.814 -32.644 -3.334)scale(1 -1)"/></g><g filter="url(#f)"><ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="matrix(.00324 1 1 -.00324 -34.34 30.47)"/></g><g filter="url(#g)"><ellipse cx="14.072" cy="22.078" fill="#ede6ff" rx="14.072" ry="22.078" style="fill:#ede6ff;fill:color(display-p3 .9275 .9033 1);fill-opacity:1" transform="rotate(93.35 24.506 48.493)scale(-1 1)"/></g><g filter="url(#h)"><ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/></g><g filter="url(#i)"><ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/></g><g filter="url(#j)"><ellipse cx=".387" cy="8.972" fill="#7e14ff" rx="4.407" ry="29.108" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(39.51 .387 8.972)"/></g><g filter="url(#k)"><ellipse cx="47.523" cy="-6.092" fill="#7e14ff" rx="4.407" ry="29.108" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(37.892 47.523 -6.092)"/></g><g filter="url(#l)"><ellipse cx="41.412" cy="6.333" fill="#47bfff" rx="5.971" ry="9.665" style="fill:#47bfff;fill:color(display-p3 .2799 .748 1);fill-opacity:1" transform="rotate(37.892 41.412 6.333)"/></g><g filter="url(#m)"><ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(37.892 -1.88 38.332)"/></g><g filter="url(#n)"><ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(37.892 -1.88 38.332)"/></g><g filter="url(#o)"><ellipse cx="35.651" cy="29.907" fill="#7e14ff" rx="4.407" ry="29.108" style="fill:#7e14ff;fill:color(display-p3 .4922 .0767 1);fill-opacity:1" transform="rotate(37.892 35.651 29.907)"/></g><g filter="url(#p)"><ellipse cx="38.418" cy="32.4" fill="#47bfff" rx="5.971" ry="15.297" style="fill:#47bfff;fill:color(display-p3 .2799 .748 1);fill-opacity:1" transform="rotate(37.892 38.418 32.4)"/></g></g><defs><filter id="b" width="60.045" height="41.654" x="-19.77" y="16.149" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/></filter><filter id="c" width="90.34" height="51.437" x="-54.613" y="-7.533" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/></filter><filter id="d" width="79.355" height="29.4" x="-49.64" y="2.03" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="e" width="79.579" height="29.4" x="-45.045" y="20.029" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="f" width="79.579" height="29.4" x="-43.513" y="21.178" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="g" width="74.749" height="58.852" x="15.756" y="-17.901" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/></filter><filter id="h" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="i" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="j" width="56.045" height="63.649" x="-27.636" y="-22.853" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="k" width="54.814" height="64.646" x="20.116" y="-38.415" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="l" width="33.541" height="35.313" x="24.641" y="-11.323" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="m" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="n" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="o" width="54.814" height="64.646" x="8.244" y="-2.416" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter><filter id="p" width="39.409" height="43.623" x="18.713" y="10.588" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/></filter></defs></svg>
+</file>
+
+<file path="frontend/public/icons.svg">
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="bluesky-icon" viewBox="0 0 16 17">
+    <g clip-path="url(#bluesky-clip)"><path fill="#08060d" d="M7.75 7.735c-.693-1.348-2.58-3.86-4.334-5.097-1.68-1.187-2.32-.981-2.74-.79C.188 2.065.1 2.812.1 3.251s.241 3.602.398 4.13c.52 1.744 2.367 2.333 4.07 2.145-2.495.37-4.71 1.278-1.805 4.512 3.196 3.309 4.38-.71 4.987-2.746.608 2.036 1.307 5.91 4.93 2.746 2.72-2.746.747-4.143-1.747-4.512 1.702.189 3.55-.4 4.07-2.145.156-.528.397-3.691.397-4.13s-.088-1.186-.575-1.406c-.42-.19-1.06-.395-2.741.79-1.755 1.24-3.64 3.752-4.334 5.099"/></g>
+    <defs><clipPath id="bluesky-clip"><path fill="#fff" d="M.1.85h15.3v15.3H.1z"/></clipPath></defs>
+  </symbol>
+  <symbol id="discord-icon" viewBox="0 0 20 19">
+    <path fill="#08060d" d="M16.224 3.768a14.5 14.5 0 0 0-3.67-1.153c-.158.286-.343.67-.47.976a13.5 13.5 0 0 0-4.067 0c-.128-.306-.317-.69-.476-.976A14.4 14.4 0 0 0 3.868 3.77C1.546 7.28.916 10.703 1.231 14.077a14.7 14.7 0 0 0 4.5 2.306q.545-.748.965-1.587a9.5 9.5 0 0 1-1.518-.74q.191-.14.372-.293c2.927 1.369 6.107 1.369 8.999 0q.183.152.372.294-.723.437-1.52.74.418.838.963 1.588a14.6 14.6 0 0 0 4.504-2.308c.37-3.911-.63-7.302-2.644-10.309m-9.13 8.234c-.878 0-1.599-.82-1.599-1.82 0-.998.705-1.82 1.6-1.82.894 0 1.614.82 1.599 1.82.001 1-.705 1.82-1.6 1.82m5.91 0c-.878 0-1.599-.82-1.599-1.82 0-.998.705-1.82 1.6-1.82.893 0 1.614.82 1.599 1.82 0 1-.706 1.82-1.6 1.82"/>
+  </symbol>
+  <symbol id="documentation-icon" viewBox="0 0 21 20">
+    <path fill="none" stroke="#aa3bff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" d="m15.5 13.333 1.533 1.322c.645.555.967.833.967 1.178s-.322.623-.967 1.179L15.5 18.333m-3.333-5-1.534 1.322c-.644.555-.966.833-.966 1.178s.322.623.966 1.179l1.534 1.321"/>
+    <path fill="none" stroke="#aa3bff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" d="M17.167 10.836v-4.32c0-1.41 0-2.117-.224-2.68-.359-.906-1.118-1.621-2.08-1.96-.599-.21-1.349-.21-2.848-.21-2.623 0-3.935 0-4.983.369-1.684.591-3.013 1.842-3.641 3.428C3 6.449 3 7.684 3 10.154v2.122c0 2.558 0 3.838.706 4.726q.306.383.713.671c.76.536 1.79.64 3.581.66"/>
+    <path fill="none" stroke="#aa3bff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" d="M3 10a2.78 2.78 0 0 1 2.778-2.778c.555 0 1.209.097 1.748-.047.48-.129.854-.503.982-.982.145-.54.048-1.194.048-1.749a2.78 2.78 0 0 1 2.777-2.777"/>
+  </symbol>
+  <symbol id="github-icon" viewBox="0 0 19 19">
+    <path fill="#08060d" fill-rule="evenodd" d="M9.356 1.85C5.05 1.85 1.57 5.356 1.57 9.694a7.84 7.84 0 0 0 5.324 7.44c.387.079.528-.168.528-.376 0-.182-.013-.805-.013-1.454-2.165.467-2.616-.935-2.616-.935-.349-.91-.864-1.143-.864-1.143-.71-.48.051-.48.051-.48.787.051 1.2.805 1.2.805.695 1.194 1.817.857 2.268.649.064-.507.27-.857.49-1.052-1.728-.182-3.545-.857-3.545-3.87 0-.857.31-1.558.8-2.104-.078-.195-.349-1 .077-2.078 0 0 .657-.208 2.14.805a7.5 7.5 0 0 1 1.946-.26c.657 0 1.328.092 1.946.26 1.483-1.013 2.14-.805 2.14-.805.426 1.078.155 1.883.078 2.078.502.546.799 1.247.799 2.104 0 3.013-1.818 3.675-3.558 3.87.284.247.528.714.528 1.454 0 1.052-.012 1.896-.012 2.156 0 .208.142.455.528.377a7.84 7.84 0 0 0 5.324-7.441c.013-4.338-3.48-7.844-7.773-7.844" clip-rule="evenodd"/>
+  </symbol>
+  <symbol id="social-icon" viewBox="0 0 20 20">
+    <path fill="none" stroke="#aa3bff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" d="M12.5 6.667a4.167 4.167 0 1 0-8.334 0 4.167 4.167 0 0 0 8.334 0"/>
+    <path fill="none" stroke="#aa3bff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" d="M2.5 16.667a5.833 5.833 0 0 1 8.75-5.053m3.837.474.513 1.035c.07.144.257.282.414.309l.93.155c.596.1.736.536.307.965l-.723.73a.64.64 0 0 0-.152.531l.207.903c.164.715-.213.991-.84.618l-.872-.52a.63.63 0 0 0-.577 0l-.872.52c-.624.373-1.003.094-.84-.618l.207-.903a.64.64 0 0 0-.152-.532l-.723-.729c-.426-.43-.289-.864.306-.964l.93-.156a.64.64 0 0 0 .412-.31l.513-1.034c.28-.562.735-.562 1.012 0"/>
+  </symbol>
+  <symbol id="x-icon" viewBox="0 0 19 19">
+    <path fill="#08060d" fill-rule="evenodd" d="M1.893 1.98c.052.072 1.245 1.769 2.653 3.77l2.892 4.114c.183.261.333.48.333.486s-.068.089-.152.183l-.522.593-.765.867-3.597 4.087c-.375.426-.734.834-.798.905a1 1 0 0 0-.118.148c0 .01.236.017.664.017h.663l.729-.83c.4-.457.796-.906.879-.999a692 692 0 0 0 1.794-2.038c.034-.037.301-.34.594-.675l.551-.624.345-.392a7 7 0 0 1 .34-.374c.006 0 .93 1.306 2.052 2.903l2.084 2.965.045.063h2.275c1.87 0 2.273-.003 2.266-.021-.008-.02-1.098-1.572-3.894-5.547-2.013-2.862-2.28-3.246-2.273-3.266.008-.019.282-.332 2.085-2.38l2-2.274 1.567-1.782c.022-.028-.016-.03-.65-.03h-.674l-.3.342a871 871 0 0 1-1.782 2.025c-.067.075-.405.458-.75.852a100 100 0 0 1-.803.91c-.148.172-.299.344-.99 1.127-.304.343-.32.358-.345.327-.015-.019-.904-1.282-1.976-2.808L6.365 1.85H1.8zm1.782.91 8.078 11.294c.772 1.08 1.413 1.973 1.425 1.984.016.017.241.02 1.05.017l1.03-.004-2.694-3.766L7.796 5.75 5.722 2.852l-1.039-.004-1.039-.004z" clip-rule="evenodd"/>
+  </symbol>
+</svg>
+</file>
+
+<file path="frontend/src/assets/react.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+</file>
+
+<file path="frontend/src/assets/vite.svg">
+<svg xmlns="http://www.w3.org/2000/svg" width="77" height="47" fill="none" aria-labelledby="vite-logo-title" viewBox="0 0 77 47"><title id="vite-logo-title">Vite</title><style>.parenthesis{fill:#000}@media (prefers-color-scheme:dark){.parenthesis{fill:#fff}}</style><path fill="#9135ff" d="M40.151 45.71c-.663.844-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.493c-.92 0-1.457-1.04-.92-1.788l7.479-10.471c1.07-1.498 0-3.578-1.842-3.578H15.443c-.92 0-1.456-1.04-.92-1.788l9.696-13.576c.213-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.472c-1.07 1.497 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.087.89 1.83L40.153 45.712z"/><mask id="a" width="48" height="47" x="14" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha"><path fill="#000" d="M40.047 45.71c-.663.843-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.389c-.92 0-1.457-1.04-.92-1.788l7.479-10.472c1.07-1.497 0-3.578-1.842-3.578H15.34c-.92 0-1.456-1.04-.92-1.788l9.696-13.575c.213-.297.556-.474.92-.474H53.93c.92 0 1.456 1.04.92 1.788L47.37 13.03c-1.07 1.498 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.088.89 1.831L40.049 45.712z"/></mask><g mask="url(#a)"><g filter="url(#b)"><ellipse cx="5.508" cy="14.704" fill="#eee6ff" rx="5.508" ry="14.704" transform="rotate(269.814 20.96 11.29)scale(-1 1)"/></g><g filter="url(#c)"><ellipse cx="10.399" cy="29.851" fill="#eee6ff" rx="10.399" ry="29.851" transform="rotate(89.814 -16.902 -8.275)scale(1 -1)"/></g><g filter="url(#d)"><ellipse cx="5.508" cy="30.487" fill="#8900ff" rx="5.508" ry="30.487" transform="rotate(89.814 -19.197 -7.127)scale(1 -1)"/></g><g filter="url(#e)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.928 4.177)scale(1 -1)"/></g><g filter="url(#f)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.738 5.52)scale(1 -1)"/></g><g filter="url(#g)"><ellipse cx="14.072" cy="22.078" fill="#eee6ff" rx="14.072" ry="22.078" transform="rotate(93.35 31.245 55.578)scale(-1 1)"/></g><g filter="url(#h)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#i)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#j)"><ellipse cx="14.592" cy="9.743" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(39.51 14.592 9.743)"/></g><g filter="url(#k)"><ellipse cx="61.728" cy="-5.321" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 61.728 -5.32)"/></g><g filter="url(#l)"><ellipse cx="55.618" cy="7.104" fill="#00c2ff" rx="5.971" ry="9.665" transform="rotate(37.892 55.618 7.104)"/></g><g filter="url(#m)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#n)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#o)"><ellipse cx="49.857" cy="30.678" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 49.857 30.678)"/></g><g filter="url(#p)"><ellipse cx="52.623" cy="33.171" fill="#00c2ff" rx="5.971" ry="15.297" transform="rotate(37.892 52.623 33.17)"/></g></g><path d="M6.919 0c-9.198 13.166-9.252 33.575 0 46.789h6.215c-9.25-13.214-9.196-33.623 0-46.789zm62.424 0h-6.215c9.198 13.166 9.252 33.575 0 46.789h6.215c9.25-13.214 9.196-33.623 0-46.789" class="parenthesis"/><defs><filter id="b" width="60.045" height="41.654" x="-5.564" y="16.92" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="c" width="90.34" height="51.437" x="-40.407" y="-6.762" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="d" width="79.355" height="29.4" x="-35.435" y="2.801" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="e" width="79.579" height="29.4" x="-30.84" y="20.8" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="f" width="79.579" height="29.4" x="-29.307" y="21.949" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="g" width="74.749" height="58.852" x="29.961" y="-17.13" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="h" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="i" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="j" width="56.045" height="63.649" x="-13.43" y="-22.082" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="k" width="54.814" height="64.646" x="34.321" y="-37.644" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="l" width="33.541" height="35.313" x="38.847" y="-10.552" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="m" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="n" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="o" width="54.814" height="64.646" x="22.45" y="-1.645" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="p" width="39.409" height="43.623" x="32.919" y="11.36" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter></defs></svg>
+</file>
+
+<file path="frontend/src/components/Navbar.tsx">
+import { NavLink, Link } from 'react-router-dom';
+
+export default function Navbar() {
+  return (
+    <nav className="navbar">
+      <div className="container">
+        <Link to="/" className="nav-logo">InvestIQ</Link>
+        <ul className="nav-links">
+          <li><NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>Home</NavLink></li>
+          <li><NavLink to="/analyze" className={({ isActive }) => isActive ? 'active' : ''}>Analyze</NavLink></li>
+          <li><NavLink to="/about" className={({ isActive }) => isActive ? 'active' : ''}>About</NavLink></li>
+          <li>
+            <NavLink to="/analyze" className="nav-cta">
+              ⚡ Start Analysis
+            </NavLink>
+          </li>
+        </ul>
+      </div>
+    </nav>
+  );
+}
+</file>
+
+<file path="frontend/src/data/stocks.ts">
+// Simulated historical price data for popular stocks
+// In a real app this would come from the backend
+export interface StockData {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePct: number;
+  volume: string;
+  mktCap: string;
+  history: { t: string; v: number }[];
+}
+
+function generateHistory(base: number, days: number, volatility: number): { t: string; v: number }[] {
+  const history = [];
+  let price = base * (1 - Math.random() * 0.15);
+  const now = new Date();
+  for (let i = days; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    price += (Math.random() - 0.48) * volatility;
+    price = Math.max(price, base * 0.7);
+    history.push({ t: d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }), v: Math.round(price * 100) / 100 });
+  }
+  return history;
+}
+
+export const POPULAR_STOCKS: StockData[] = [
+  {
+    symbol: 'RELIANCE.NS',
+    name: 'Reliance Industries',
+    price: 2987.45,
+    change: 42.30,
+    changePct: 1.44,
+    volume: '8.2M',
+    mktCap: '₹20.2T',
+    history: generateHistory(2987, 30, 35),
+  },
+  {
+    symbol: 'TCS.NS',
+    name: 'Tata Consultancy Services',
+    price: 4102.80,
+    change: -28.60,
+    changePct: -0.69,
+    volume: '3.1M',
+    mktCap: '₹14.9T',
+    history: generateHistory(4102, 30, 40),
+  },
+  {
+    symbol: 'HDFCBANK.NS',
+    name: 'HDFC Bank',
+    price: 1762.35,
+    change: 19.85,
+    changePct: 1.14,
+    volume: '11.4M',
+    mktCap: '₹13.4T',
+    history: generateHistory(1762, 30, 20),
+  },
+  {
+    symbol: 'INFY.NS',
+    name: 'Infosys Limited',
+    price: 1897.60,
+    change: -11.20,
+    changePct: -0.59,
+    volume: '5.7M',
+    mktCap: '₹7.9T',
+    history: generateHistory(1897, 30, 28),
+  },
+  {
+    symbol: 'AAPL',
+    name: 'Apple Inc.',
+    price: 221.73,
+    change: 3.12,
+    changePct: 1.43,
+    volume: '52.3M',
+    mktCap: '$3.4T',
+    history: generateHistory(221, 30, 3),
+  },
+  {
+    symbol: 'TATAMOTORS.NS',
+    name: 'Tata Motors',
+    price: 987.15,
+    change: -15.45,
+    changePct: -1.54,
+    volume: '14.8M',
+    mktCap: '₹3.6T',
+    history: generateHistory(987, 30, 18),
+  },
+];
+
+export const TICKER_DATA = [
+  ...POPULAR_STOCKS,
+  { symbol: 'WIPRO.NS', name: 'Wipro', price: 541.20, change: 7.30, changePct: 1.37, volume: '', mktCap: '', history: [] },
+  { symbol: 'BAJFINANCE.NS', name: 'Bajaj Finance', price: 7823.40, change: -62.10, changePct: -0.79, volume: '', mktCap: '', history: [] },
+  { symbol: 'MSFT', name: 'Microsoft', price: 418.92, change: 5.44, changePct: 1.32, volume: '', mktCap: '', history: [] },
+  { symbol: 'NVDA', name: 'NVIDIA', price: 123.45, change: -1.80, changePct: -1.44, volume: '', mktCap: '', history: [] },
+];
+</file>
+
+<file path="frontend/src/pages/AboutPage.tsx">
+import { Link } from 'react-router-dom';
+
+const PIPELINE_STEPS = [
+  { icon: '📡', name: 'Data Ingestion', desc: 'Yahoo Finance + DuckDuckGo News' },
+  { icon: '📊', name: 'Quant Agent', desc: 'Technical Indicators' },
+  { icon: '🔬', name: 'Fundamental', desc: 'Valuation & Ratios' },
+  { icon: '📰', name: 'Sentiment', desc: 'FinBERT NLP' },
+  { icon: '⚠️', name: 'Risk Agent', desc: 'VaR & Volatility' },
+  { icon: '🧠', name: 'Meta Agent', desc: 'Consensus Decision' },
+];
+
+const AGENTS = [
+  {
+    icon: '📊',
+    name: 'Quantitative Agent',
+    desc: 'Ingests OHLCV data and computes RSI, MACD, Bollinger Bands, 50/200-day SMA crossovers, and momentum signals. Outputs a BUY/HOLD/SELL recommendation with detailed technical reasoning.',
+    inputs: ['Price History (1Y)', 'Volume', 'OHLCV'],
+    output: 'Technical Signal',
+  },
+  {
+    icon: '🔬',
+    name: 'Fundamental Agent',
+    desc: 'Evaluates company health via P/E ratio, P/B, forward EPS, revenue growth, operating margin, debt-to-equity, return on equity, and dividend yield against sector medians.',
+    inputs: ['Market Cap', 'EPS', 'Debt Ratios'],
+    output: 'Value Signal',
+  },
+  {
+    icon: '📰',
+    name: 'Sentiment Agent',
+    desc: 'Fetches the latest 10 news headlines via DuckDuckGo and runs them through the ProsusAI/FinBERT model, a financial-domain BERT fine-tuned on FiQA, Headline, and Financial PhraseBank datasets.',
+    inputs: ['News Headlines', 'FinBERT Model'],
+    output: 'Sentiment Score',
+  },
+  {
+    icon: '⚠️',
+    name: 'Risk Agent',
+    desc: 'Computes portfolio risk metrics including Value-at-Risk (VaR 95%/99%), Conditional VaR (CVaR), annualized volatility, Sharpe ratio, and maximum historical drawdown from the 1Y price series.',
+    inputs: ['Historical Returns', 'VaR/CVaR'],
+    output: 'Risk Classification',
+  },
+  {
+    icon: '🧠',
+    name: 'Meta Agent',
+    desc: 'Acts as the final deliberation layer. Receives all four specialist signals and their reasoning, then synthesizes a weighted consensus verdict with a confidence score using chain-of-thought prompting via Groq LLM.',
+    inputs: ['All 4 Agent Reports'],
+    output: 'Final Consensus + Confidence',
+  },
+];
+
+const TECH_STACK = [
+  { icon: '⚛️', name: 'React 19', type: 'Frontend Framework' },
+  { icon: '📘', name: 'TypeScript', type: 'Language' },
+  { icon: '⚡', name: 'Vite', type: 'Build Tool' },
+  { icon: '📈', name: 'Recharts', type: 'Visualization' },
+  { icon: '🐍', name: 'FastAPI', type: 'Backend' },
+  { icon: '🔗', name: 'LangGraph', type: 'Agent Orchestration' },
+  { icon: '🤗', name: 'FinBERT', type: 'NLP Model' },
+  { icon: '🚀', name: 'Groq LLM', type: 'AI Inference' },
+  { icon: '📊', name: 'yfinance', type: 'Market Data' },
+  { icon: '🔍', name: 'DuckDuckGo', type: 'News Search' },
+];
+
+export default function AboutPage() {
+  return (
+    <div className="page-wrapper">
+      <div className="container about-page">
+        {/* Hero */}
+        <div className="about-hero animate-fade-up">
+          <div className="section-label">Architecture Deep Dive</div>
+          <h1 className="section-title" style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)' }}>
+            How <span style={{ background: 'var(--gradient-brand)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>InvestIQ</span> Works
+          </h1>
+          <p className="section-subtitle" style={{ margin: '0 auto', textAlign: 'center' }}>
+            A LangGraph-powered multi-agent deliberation system where five specialized AI agents
+            independently analyze a stock, debate their findings, and converge on a consensus decision.
+          </p>
+        </div>
+
+        {/* Pipeline */}
+        <div className="pipeline-section animate-fade-up-delay-1">
+          <div className="section-label">System Pipeline</div>
+          <h2 className="section-title" style={{ fontSize: '1.8rem' }}>End-to-End Flow</h2>
+          <div className="pipeline">
+            {PIPELINE_STEPS.map((step, i) => (
+              <div className="pipeline-step" key={i}>
+                <div className="pipeline-icon">{step.icon}</div>
+                <div className="pipeline-step-name">{step.name}</div>
+                <div className="pipeline-step-desc">{step.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Agent Details */}
+        <div style={{ marginBottom: 80 }} className="animate-fade-up-delay-2">
+          <div className="section-label">Agent Profiles</div>
+          <h2 className="section-title" style={{ fontSize: '1.8rem', marginBottom: 32 }}>The Five Agents</h2>
+          <div className="agent-details-grid">
+            {AGENTS.map(agent => (
+              <div className="glass-card agent-detail-card" key={agent.name}>
+                <div className="agent-detail-icon">{agent.icon}</div>
+                <div className="agent-detail-name">{agent.name}</div>
+                <div className="agent-detail-desc" style={{ marginBottom: 16 }}>{agent.desc}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 'auto' }}>
+                  {agent.inputs.map(inp => (
+                    <span key={inp} style={{
+                      fontSize: '0.72rem', padding: '3px 10px',
+                      background: 'rgba(0,212,255,0.07)', border: '1px solid rgba(0,212,255,0.15)',
+                      borderRadius: 20, color: 'var(--accent-cyan)', fontWeight: 600,
+                    }}>{inp}</span>
+                  ))}
+                  <span style={{
+                    fontSize: '0.72rem', padding: '3px 10px',
+                    background: 'rgba(0,230,118,0.07)', border: '1px solid rgba(0,230,118,0.15)',
+                    borderRadius: 20, color: 'var(--signal-buy)', fontWeight: 600,
+                  }}>→ {agent.output}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tech Stack */}
+        <div style={{ marginBottom: 80 }} className="animate-fade-up-delay-3">
+          <div className="section-label">Built With</div>
+          <h2 className="section-title" style={{ fontSize: '1.8rem' }}>Technology Stack</h2>
+          <div className="tech-stack-grid">
+            {TECH_STACK.map(tech => (
+              <div className="tech-pill" key={tech.name}>
+                <span className="tech-pill-icon">{tech.icon}</span>
+                <div>
+                  <div className="tech-pill-name">{tech.name}</div>
+                  <div className="tech-pill-type">{tech.type}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div style={{ textAlign: 'center', padding: '24px 0 40px' }} className="animate-fade-up-delay-4">
+          <div className="glass-card" style={{ padding: '48px 40px', maxWidth: 560, margin: '0 auto' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: 20 }}>🚀</div>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: 12 }}>Ready to Analyze?</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 28, fontSize: '0.9rem', lineHeight: 1.65 }}>
+              Run the full multi-agent AI pipeline on any NSE, BSE or global stock ticker in under 30 seconds.
+            </p>
+            <Link to="/analyze" className="btn btn-primary btn-lg">
+              ⚡ Start Analysis
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <footer className="footer">
+        <p>© 2026 <span>InvestIQ</span> · For educational purposes only. Not financial advice.</p>
+      </footer>
+    </div>
+  );
+}
+</file>
+
+<file path="frontend/src/pages/AnalyzePage.tsx">
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
+
+interface AgentAnalysis {
+  signal: string;
+  reasoning: string;
+}
+
+interface AnalysisResult {
+  symbol: string;
+  resolved_symbol: string;
+  final_decision: {
+    final_signal: string;
+    confidence_score: number;
+    reasoning: string;
+    quant_analysis?: AgentAnalysis;
+    fundamental_analysis?: AgentAnalysis;
+    sentiment_analysis?: AgentAnalysis;
+    risk_analysis?: AgentAnalysis;
+  };
+  risk_metrics?: Record<string, number | string>;
+  sentiment_scores?: Record<string, number | string>;
+  is_demo_mode?: boolean;
+}
+
+interface SymbolSuggestion {
+  symbol: string;
+  name: string;
+  exchange: string;
+  type: string;
+  logo_url?: string;
+}
+
+/** Deterministic hue from a string — used for fallback avatar color */
+function stringToHue(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return Math.abs(hash) % 360;
+}
+
+function CompanyLogo({ symbol, logoUrl, name }: { symbol: string; logoUrl?: string; name: string }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const hue = stringToHue(symbol);
+  const letters = symbol.replace(/\.(NS|BO)$/, '').slice(0, 2);
+
+  if (logoUrl && !imgFailed) {
+    return (
+      <div style={{
+        width: 38, height: 38, borderRadius: 10, overflow: 'hidden', flexShrink: 0,
+        background: `hsl(${hue},60%,18%)`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <img
+          src={logoUrl}
+          alt={name}
+          onError={() => setImgFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }}
+        />
+      </div>
+    );
+  }
+
+  // Fallback: coloured letter avatar
+  return (
+    <div style={{
+      width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+      background: `linear-gradient(135deg, hsl(${hue},70%,35%), hsl(${(hue+40)%360},70%,25%))`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontWeight: 800, fontSize: '0.75rem', color: '#fff', letterSpacing: 0.5,
+    }}>
+      {letters}
+    </div>
+  );
+}
+
+const AGENT_CONFIG = [
+  { key: 'quant_analysis',        icon: '📊', name: 'Quant Agent',        color: '#00d4ff' },
+  { key: 'fundamental_analysis',  icon: '🔬', name: 'Fundamental Agent',  color: '#7c3aed' },
+  { key: 'sentiment_analysis',    icon: '📰', name: 'Sentiment Agent',    color: '#f472b6' },
+  { key: 'risk_analysis',         icon: '⚠️', name: 'Risk Agent',         color: '#ffb700' },
+];
+
+function SignalTag({ signal }: { signal: string }) {
+  const s = signal?.toUpperCase();
+  const cls = s === 'BUY' ? 'buy' : s === 'SELL' ? 'sell' : 'hold';
+  return <span className={`signal-tag ${cls}`}>{s}</span>;
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="confidence-bar-container">
+      <div className="confidence-label">
+        <span>Confidence</span>
+        <span style={{ color: '#f0f4ff', fontWeight: 700 }}>{pct}%</span>
+      </div>
+      <div className="confidence-bar-track">
+        <div className="confidence-bar-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="results-container">
+      <div className="meta-consensus-card glass-card" style={{ height: 260 }}>
+        <div className="skeleton" style={{ height: '100%', borderRadius: 20 }} />
+      </div>
+      <div className="agents-grid">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="glass-card agent-card" style={{ height: 160 }}>
+            <div className="skeleton" style={{ height: '100%', borderRadius: 12 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function AnalyzePage() {
+  const [searchParams] = useSearchParams();
+  const [symbol, setSymbol] = useState(searchParams.get('symbol') || '');
+  const [provider, setProvider] = useState('openai');
+  const [apiKey, setApiKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState('');
+
+  // Autocomplete state
+  const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const API_BASE = import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : 'http://localhost:8000/api';
+
+  // Fetch autocomplete suggestions with debounce
+  const fetchSuggestions = useCallback((query: string) => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!query || query.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(async () => {
+      setSuggestionLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query.trim())}`);
+        if (res.ok) {
+          const data: SymbolSuggestion[] = await res.json();
+          setSuggestions(data);
+          setShowSuggestions(data.length > 0);
+        }
+      } catch {
+        // Silently ignore autocomplete errors
+      } finally {
+        setSuggestionLoading(false);
+      }
+    }, 300);
+  }, [API_BASE]);
+
+  const handleInputChange = (val: string) => {
+    setSymbol(val);
+    fetchSuggestions(val);
+  };
+
+  const handleSuggestionClick = (suggestion: SymbolSuggestion) => {
+    setSymbol(suggestion.symbol);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    handleAnalyze(suggestion.symbol);
+  };
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleAnalyze = async (sym?: string) => {
+    const target = (sym ?? symbol).trim();
+    if (!target) return;
+    setSymbol(target);
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setLoading(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          symbol: target,
+          provider: provider,
+          api_key: apiKey || undefined 
+        }),
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Analysis failed. Please check the symbol and try again.');
+      }
+      const data = await response.json();
+      setResult(data);
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-analyze if symbol comes from URL param
+  useEffect(() => {
+    const sym = searchParams.get('symbol');
+    if (sym) handleAnalyze(sym);
+  }, []);
+
+  const signal = result?.final_decision?.final_signal?.toLowerCase() ?? '';
+
+  const QUICK_PICKS = ['RELIANCE.NS', 'TCS.NS', 'AAPL', 'NVIDIA', 'MAHINDRA'];
+
+  return (
+    <div className="page-wrapper">
+      <div className="container analyze-page">
+        {/* Header */}
+        <div className="analyze-header">
+          <div className="section-label">AI Consensus Engine</div>
+          <h1 className="section-title">Stock Analysis</h1>
+          <p className="section-subtitle" style={{ margin: '0 auto 32px', textAlign: 'center' }}>
+            Enter any company name, NSE/BSE ticker, or global stock. Five AI agents will debate and reach a consensus in seconds.
+          </p>
+
+          {/* Search Bar with Autocomplete */}
+          <div style={{ position: 'relative', maxWidth: 600, margin: '0 auto' }} ref={suggestionsRef}>
+            <div className="search-bar" style={{ margin: 0 }}>
+              <input
+                id="stock-symbol-input"
+                className="input-field"
+                type="text"
+                placeholder="e.g. Mahindra, NVIDIA, Reliance, AAPL…"
+                value={symbol}
+                onChange={e => handleInputChange(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { handleAnalyze(); }
+                  if (e.key === 'Escape') { setShowSuggestions(false); }
+                }}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                autoComplete="off"
+              />
+              <button
+                id="analyze-btn"
+                className="btn btn-primary"
+                onClick={() => handleAnalyze()}
+                disabled={loading || !symbol.trim()}
+                style={{ whiteSpace: 'nowrap', minWidth: 120 }}
+              >
+                {loading ? <><span className="spinner" /> Analyzing…</> : '⚡ Analyze'}
+              </button>
+            </div>
+
+            {/* Autocomplete Dropdown */}
+            {showSuggestions && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 0,
+                right: 0,
+                background: 'rgba(10,10,22,0.98)',
+                border: '1px solid rgba(255,255,255,0.10)',
+                borderRadius: 14,
+                zIndex: 100,
+                boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+                backdropFilter: 'blur(24px)',
+                overflow: 'hidden',
+              }}>
+                {suggestions.map((s, i) => (
+                  <div
+                    key={`${s.symbol}-${i}`}
+                    onClick={() => handleSuggestionClick(s)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 14px',
+                      cursor: 'pointer',
+                      borderBottom: i < suggestions.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {/* Logo / Avatar */}
+                    <CompanyLogo symbol={s.symbol} logoUrl={s.logo_url} name={s.name} />
+
+                    {/* Symbol + Name */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{
+                        fontWeight: 700, color: '#00d4ff', fontSize: '0.88rem',
+                        letterSpacing: 0.3, whiteSpace: 'nowrap',
+                      }}>{s.symbol}</span>
+                      <span style={{
+                        fontSize: '0.76rem', color: 'rgba(255,255,255,0.5)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{s.name}</span>
+                    </div>
+
+                    {/* Badges */}
+                    <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+                      {s.exchange && (
+                        <span style={{
+                          fontSize: '0.68rem', color: 'rgba(255,255,255,0.45)',
+                          background: 'rgba(255,255,255,0.08)', padding: '2px 7px',
+                          borderRadius: 20, whiteSpace: 'nowrap',
+                        }}>{s.exchange}</span>
+                      )}
+                      <span style={{
+                        fontSize: '0.68rem', color: 'rgba(255,255,255,0.35)',
+                        background: 'rgba(255,255,255,0.05)', padding: '2px 7px',
+                        borderRadius: 20,
+                      }}>{s.type}</span>
+                    </div>
+                  </div>
+                ))}
+                {suggestionLoading && (
+                  <div style={{ padding: '10px 14px', color: 'rgba(255,255,255,0.35)', fontSize: '0.82rem' }}>
+                    Searching…
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          
+          <div className="api-settings" style={{ display: 'flex', gap: 10, justifyContent: 'center', margin: '20px auto 0', maxWidth: 600 }}>
+            <select 
+              className="input-field" 
+              style={{ width: 'auto', flex: '0 1 150px' }}
+              value={provider}
+              onChange={e => setProvider(e.target.value)}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Gemini</option>
+            </select>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="API Key (Optional, uses server key if blank)"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              style={{ flex: '1 1 300px' }}
+            />
+          </div>
+
+          <div className="search-hint">
+            Quick picks:&nbsp;
+            {QUICK_PICKS.map(s => (
+              <span key={s} onClick={() => handleAnalyze(s)} style={{ cursor: 'pointer' }}>{s}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="error-box">
+            <span>⚠️</span>
+            {error}
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && <LoadingSkeleton />}
+
+        {/* Results */}
+        {result && !loading && (
+          <div className="results-container">
+            {/* Meta Consensus */}
+            <div className="glass-card meta-consensus-card" style={{ position: 'relative' }}>
+              {result.is_demo_mode && (
+                <div style={{ position: 'absolute', top: 16, right: 16, background: '#ff4d4f', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 'bold' }}>
+                  DEMO MODE
+                </div>
+              )}
+              <div className="consensus-label">Meta-Agent Consensus</div>
+              <div className="consensus-symbol">
+                📌 {result.resolved_symbol || result.symbol}
+                {result.resolved_symbol && result.resolved_symbol !== result.symbol.toUpperCase() && (
+                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)', marginLeft: 8, fontWeight: 400 }}>
+                    (resolved from "{result.symbol}")
+                  </span>
+                )}
+              </div>
+              <div className={`consensus-signal ${signal}`}>
+                {result.final_decision.final_signal?.toUpperCase()}
+              </div>
+              <ConfidenceBar value={result.final_decision.confidence_score} />
+              {result.final_decision.reasoning && (
+                <div className="consensus-reasoning">
+                  💡 {result.final_decision.reasoning}
+                </div>
+              )}
+            </div>
+
+            {/* Sub-Agents Grid */}
+            <div style={{ marginBottom: 12 }}>
+              <div className="section-label">Specialist Agent Reports</div>
+            </div>
+            <div className="agents-grid">
+              {AGENT_CONFIG.map(agent => {
+                const data = result.final_decision[agent.key as keyof typeof result.final_decision] as AgentAnalysis | undefined;
+                return (
+                  <div key={agent.key} className="glass-card agent-card">
+                    <div className="agent-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span className="agent-icon">{agent.icon}</span>
+                        <span className="agent-name">{agent.name}</span>
+                      </div>
+                      {data?.signal ? (
+                        <SignalTag signal={data.signal} />
+                      ) : (
+                        <span className="signal-tag hold" style={{ opacity: 0.5 }}>N/A</span>
+                      )}
+                    </div>
+                    <div className="agent-reasoning">
+                      {data?.reasoning ?? 'No detailed report from this agent for this analysis.'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Risk Metrics */}
+            {result.risk_metrics && Object.keys(result.risk_metrics).length > 0 && (
+              <>
+                <div style={{ margin: '32px 0 12px' }}>
+                  <div className="section-label">Risk Metrics</div>
+                </div>
+                <div className="metrics-grid">
+                  {Object.entries(result.risk_metrics).map(([k, v]) => (
+                    <div className="metric-card" key={k}>
+                      <div className="metric-value">
+                        {typeof v === 'number' ? v.toFixed(3) : String(v)}
+                      </div>
+                      <div className="metric-label">{k.replace(/_/g, ' ')}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Sentiment Breakdown */}
+            {result.sentiment_scores && Object.keys(result.sentiment_scores).length > 0 && (
+              <>
+                <div style={{ margin: '32px 0 12px' }}>
+                  <div className="section-label">Sentiment Breakdown</div>
+                </div>
+                <div className="metrics-grid">
+                  {Object.entries(result.sentiment_scores).map(([k, v]) => (
+                    <div className="metric-card" key={k}>
+                      <div className="metric-value">
+                        {typeof v === 'number' ? (v < 1 ? (v * 100).toFixed(1) + '%' : v) : String(v)}
+                      </div>
+                      <div className="metric-label">{k.replace(/_/g, ' ')}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div style={{ textAlign: 'center', marginTop: 48 }}>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: 16 }}>
+                ⚠️ This is an AI-generated analysis for educational purposes only. Not financial advice.
+              </p>
+              <Link to="/" className="btn btn-outline">← Back to Home</Link>
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!result && !loading && !error && (
+          <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: '4rem', marginBottom: 20 }}>🔍</div>
+            <p style={{ fontSize: '1rem' }}>Enter a company name or stock symbol above to begin your AI analysis</p>
+            <p style={{ fontSize: '0.85rem', marginTop: 8, color: 'rgba(255,255,255,0.3)' }}>
+              Try typing "Mahindra", "NVIDIA", "Apple" or paste a ticker like "RELIANCE.NS"
+            </p>
+          </div>
+        )}
+      </div>
+
+      <footer className="footer">
+        <p>© 2026 <span>InvestIQ</span> · For educational purposes only. Not financial advice.</p>
+      </footer>
+    </div>
+  );
+}
+</file>
+
+<file path="frontend/src/pages/HomePage.css">
+:root{
+  --bg: #F6F1E6;
+  --surface: #FFFFFF;
+  --ink: #2A2820;
+  --muted: #746E5E;
+  --faint: #A29C89;
+  --border: #E9E1CF;
+  --border-soft: #F1EBDC;
+  --terracotta: #E1673D;
+  --terracotta-dark: #C8532D;
+  --purple: #8C7CE0;
+  --blue: #4E8BE0;
+  --teal: #2FA79A;
+  --pink: #E066A0;
+  --green: #1E9450;
+  --green-bg: #E4F5EA;
+  --amber: #C4841B;
+  --amber-bg: #FBF0DC;
+  --radius: 16px;
+  --shadow: 0 1px 2px rgba(42,40,32,0.05), 0 14px 30px -16px rgba(42,40,32,0.18);
+}
+
+.landing-page {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+.landing-page h1, .landing-page h2, .landing-page h3, .landing-page .display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; font-weight: 600; color: var(--ink); }
+.landing-page .mono { font-family: 'IBM Plex Mono', monospace; }
+.landing-page a { text-decoration: none; color: inherit; }
+.landing-page ul { list-style: none; }
+.landing-page img { max-width: 100%; display: block; }
+.landing-page .container { max-width: 1120px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+
+.landing-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+.landing-page .btn-primary { background: var(--terracotta); color: white; box-shadow: 0 8px 20px -8px rgba(225,103,61,0.55); }
+.landing-page .btn-primary:hover { background: var(--terracotta-dark); transform: translateY(-1px); }
+.landing-page .btn-ghost { color: var(--muted); font-weight: 500; padding: 10px 16px; }
+.landing-page .btn-ghost:hover { color: var(--ink); }
+.landing-page .btn-outline { border: 1.5px solid var(--ink); color: var(--ink); background: transparent; }
+.landing-page .btn-outline:hover { background: var(--ink); color: white; }
+.landing-page .btn-lg { padding: 15px 30px; font-size: 1rem; }
+
+.landing-page header.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(246,241,230,0.88);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.landing-page .nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.landing-page .logo { display: flex; align-items: center; gap: 9px; font-family: 'Space Grotesk'; font-weight: 700; font-size: 1.1rem; }
+.landing-page .logo-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--terracotta), var(--pink));
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.landing-page .nav-links { display: flex; gap: 30px; font-size: 0.9rem; color: var(--muted); font-weight: 500; }
+.landing-page .nav-links a:hover { color: var(--ink); }
+.landing-page .nav-actions { display: flex; align-items: center; gap: 8px; }
+
+.landing-page .hero { padding: 48px 0 0; position: relative; }
+.landing-page .hero-inner { text-align: center; max-width: 740px; margin: 0 auto; position: relative; }
+.landing-page .doodle { position: absolute; opacity: 0.5; pointer-events: none; }
+.landing-page .hero .doodle-1 { top: -20px; left: -60px; width: 140px; }
+.landing-page .hero .doodle-2 { top: 60px; right: -80px; width: 110px; }
+.landing-page .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+.landing-page .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); position: relative; }
+.landing-page .eyebrow .dot::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1.5px solid var(--green); animation: pulse 2s infinite;
+}
+@keyframes pulse { 0% { transform: scale(0.6); opacity: 1; } 100% { transform: scale(1.9); opacity: 0; } }
+.landing-page .hero h1 { font-size: 3.3rem; line-height: 1.08; margin-bottom: 20px; color: var(--ink); }
+.landing-page .hero h1 .swirl { position: relative; white-space: nowrap; }
+.landing-page .hero p.lead { font-size: 1.12rem; color: var(--muted); max-width: 560px; margin: 0 auto 30px; }
+.landing-page .hero-ctas { display: flex; gap: 20px; justify-content: center; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+.landing-page .trust-badges { display: flex; align-items: center; gap: 22px; font-size: 0.72rem; color: var(--faint); font-weight: 600; }
+.landing-page .trust-badges .b { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.landing-page .trust-badges .b .ic { font-size: 1.3rem; }
+
+.landing-page .console-wrap { position: relative; max-width: 900px; margin: 70px auto 0; }
+.landing-page .console {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  text-align: left;
+}
+.landing-page .console-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.landing-page .console-top .ticker {
+  font-family: "IBM Plex Mono";
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: var(--amber-bg);
+  color: var(--amber);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.landing-page .console-top .dots { display: flex; gap: 6px; }
+.landing-page .console-top .dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.landing-page .console-body { display: grid; grid-template-columns: 1.2fr 1fr; }
+@media (max-width: 780px) { .landing-page .console-body { grid-template-columns: 1fr; } }
+.landing-page .agents-col { padding: 20px 22px; border-right: 1px solid var(--border-soft); }
+@media (max-width: 780px) { .landing-page .agents-col { border-right: none; border-bottom: 1px solid var(--border-soft); } }
+.landing-page .agent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.landing-page .agent-row:last-child { border-bottom: none; }
+.landing-page .agent-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+.landing-page .agent-info { flex: 1; min-width: 0; }
+.landing-page .agent-name { font-size: 0.86rem; font-weight: 600; color: var(--ink); }
+.landing-page .agent-detail { font-size: 0.77rem; color: var(--faint); }
+.landing-page .agent-signal {
+  font-family: "IBM Plex Mono";
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.landing-page .signal-buy { background: var(--green-bg); color: var(--green); }
+.landing-page .signal-hold { background: var(--amber-bg); color: var(--amber); }
+.landing-page .verdict-col {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: radial-gradient(circle at 50% 20%, #FBF6EC, var(--surface) 70%);
+}
+.landing-page .verdict-ring {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: conic-gradient(var(--terracotta) 0deg 302deg, var(--border) 302deg 360deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  position: relative;
+}
+.landing-page .verdict-ring::before { content: ""; position: absolute; width: 88px; height: 88px; border-radius: 50%; background: var(--surface); }
+.landing-page .verdict-ring .pct { position: relative; font-family: "Space Grotesk"; font-weight: 700; font-size: 1.3rem; color: var(--terracotta-dark); }
+.landing-page .verdict-label {
+  font-family: "IBM Plex Mono";
+  font-weight: 700;
+  font-size: 0.76rem;
+  color: var(--green);
+  background: var(--green-bg);
+  padding: 5px 13px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.landing-page .verdict-sub { font-size: 0.76rem; color: var(--faint); max-width: 200px; }
+
+.landing-page .float-card {
+  position: absolute;
+  right: -30px;
+  bottom: -34px;
+  background: var(--surface);
+  border: 1.5px solid var(--terracotta);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 14px 18px;
+  font-size: 0.82rem;
+  max-width: 260px;
+  z-index: 2;
+}
+@media (max-width: 780px) { .landing-page .float-card { display: none; } }
+.landing-page .float-card .row1 { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
+.landing-page .float-card .row1 .chk { color: var(--green); }
+.landing-page .float-card .row2 { color: var(--purple); font-size: 0.78rem; }
+
+.landing-page .logos-strip { padding: 40px 0 48px; text-align: center; }
+.landing-page .logos-strip .cap { font-size: 0.8rem; color: var(--faint); margin-bottom: 22px; }
+.landing-page .logos-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 40px;
+  flex-wrap: wrap;
+  font-family: "Space Grotesk";
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.9rem;
+  opacity: 0.75;
+}
+
+.landing-page section { padding: 48px 0; }
+.landing-page .section-head { max-width: 560px; margin: 0 0 44px; }
+.landing-page .section-head.center { margin-left: auto; margin-right: auto; text-align: center; }
+.landing-page .tag { font-size: 0.78rem; font-weight: 700; color: var(--terracotta-dark); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+.landing-page .section-head h2 { font-size: 1.95rem; margin-bottom: 12px; line-height: 1.18; }
+.landing-page .section-head p { color: var(--muted); font-size: 1rem; }
+
+.landing-page .agent-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+@media (max-width: 900px) { .landing-page .agent-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .landing-page .agent-grid { grid-template-columns: 1fr; } }
+.landing-page .agent-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 18px;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.landing-page .agent-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: var(--terracotta); }
+.landing-page .agent-card .icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.05rem; margin-bottom: 14px;
+}
+.landing-page .agent-card h3 { font-size: 0.92rem; margin-bottom: 6px; color: var(--ink); }
+.landing-page .agent-card p { font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
+
+.landing-page .split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+@media (max-width: 860px) { .landing-page .split { grid-template-columns: 1fr; gap: 36px; } }
+.landing-page .split-text h2 { font-size: 1.85rem; margin-bottom: 14px; }
+.landing-page .split-text p { color: var(--muted); font-size: 0.98rem; margin-bottom: 20px; }
+.landing-page .check-list { display: flex; flex-direction: column; gap: 11px; }
+.landing-page .check-list li { display: flex; gap: 10px; align-items: flex-start; font-size: 0.93rem; color: var(--ink); }
+.landing-page .check-list li::before {
+  content: "✓";
+  flex-shrink: 0;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--green-bg);
+  color: var(--green);
+  font-size: 0.66rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+.landing-page .split-visual {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+.landing-page .drift-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 10px; background: var(--bg); margin-bottom: 9px; font-size: 0.85rem; }
+.landing-page .drift-item:last-child { margin-bottom: 0; }
+.landing-page .drift-item .drift-desc { display: flex; flex-direction: column; gap: 3px; }
+.landing-page .drift-item .drift-tag { font-family: "IBM Plex Mono"; font-size: 0.68rem; color: var(--faint); }
+.landing-page .drift-badge { font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.landing-page .badge-1 { background: #EEEAFB; color: var(--purple); }
+.landing-page .badge-2 { background: #FDECEA; color: var(--terracotta-dark); }
+.landing-page .badge-3 { background: var(--amber-bg); color: var(--amber); }
+.landing-page .badge-4 { background: var(--green-bg); color: var(--green); }
+
+.landing-page .final-cta { text-align: center; padding: 64px 0; position: relative; }
+.landing-page .final-cta .cta-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 64px 40px;
+  box-shadow: var(--shadow);
+  max-width: 720px;
+  margin: 0 auto;
+}
+.landing-page .final-cta h2 { font-size: 2.1rem; margin-bottom: 14px; }
+.landing-page .final-cta p { color: var(--muted); font-size: 1rem; margin-bottom: 28px; }
+
+.landing-page footer { border-top: 1px solid var(--border); padding: 32px 0; }
+.landing-page .footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+  color: var(--faint);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.landing-page .footer-bottom .foot-links { display: flex; gap: 20px; }
+.landing-page .footer-bottom .foot-links a:hover { color: var(--ink); }
+</file>
+
+<file path="frontend/src/pages/HomePage.tsx">
+import React from 'react';
+import { Link } from 'react-router-dom';
+import './HomePage.css';
+
+export default function HomePage() {
+  return (
+    <div className="landing-page">
+      <header className="nav">
+        <div className="nav-inner">
+          <Link to="/" className="logo"><span className="logo-mark">IQ</span>InvestIQ</Link>
+          <nav className="nav-links">
+            <a href="#agents">Agents</a>
+            <a href="#how">How it works</a>
+            <a href="#">Pricing</a>
+          </nav>
+          <div className="nav-actions">
+            <Link to="/login" className="btn btn-ghost">Sign in</Link>
+            <Link to="/analyze" className="btn btn-primary">Analyze a stock</Link>
+          </div>
+        </div>
+      </header>
+
+      <section className="hero">
+        <div className="container hero-inner">
+          <svg className="doodle doodle-1" viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="70" cy="70" r="55" stroke="#DCC9A3" strokeWidth="2" strokeDasharray="1 10" strokeLinecap="round"/>
+          </svg>
+          <svg className="doodle doodle-2" viewBox="0 0 110 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 50 Q30 10 55 35 T105 20" stroke="#DCC9A3" strokeWidth="2" fill="none" strokeLinecap="round"/>
+          </svg>
+
+          <div className="eyebrow"><span className="dot"></span>5 AI agents in session</div>
+          <h1>One verdict, reached by agents that don't agree by default</h1>
+          <p className="lead">InvestIQ runs Quant, Fundamental, Sentiment, Risk and Meta agents on any stock - each argues its case independently, then a weighted consensus tells you what holds up.</p>
+          <div className="hero-ctas">
+            <Link to="/analyze" className="btn btn-primary btn-lg">Analyze a stock</Link>
+            <div className="trust-badges">
+              <div className="b"><span className="ic">📊</span>Live data</div>
+              <div className="b"><span className="ic">🔒</span>Bank-grade</div>
+              <div className="b"><span className="ic">✅</span>Cited sources</div>
+            </div>
+          </div>
+
+          <div className="console-wrap">
+            <div className="console">
+              <div className="console-top">
+                <span className="ticker">RELIANCE.NS</span>
+                <div className="dots"><span></span><span></span><span></span></div>
+              </div>
+              <div className="console-body">
+                <div className="agents-col">
+                  <div className="agent-row">
+                    <div className="agent-avatar" style={{background: '#EEEAFB'}}>📊</div>
+                    <div className="agent-info"><div className="agent-name">Quant</div><div className="agent-detail">MACD bullish cross</div></div>
+                    <div className="agent-signal signal-buy">BUY</div>
+                  </div>
+                  <div className="agent-row">
+                    <div className="agent-avatar" style={{background: '#E4F0FC'}}>🔬</div>
+                    <div className="agent-info"><div className="agent-name">Fundamental</div><div className="agent-detail">P/E in line with sector</div></div>
+                    <div className="agent-signal signal-hold">HOLD</div>
+                  </div>
+                  <div className="agent-row">
+                    <div className="agent-avatar" style={{background: '#FCE8F1'}}>📰</div>
+                    <div className="agent-info"><div className="agent-name">Sentiment</div><div className="agent-detail">Positive news, 30 days</div></div>
+                    <div className="agent-signal signal-buy">BUY</div>
+                  </div>
+                  <div className="agent-row">
+                    <div className="agent-avatar" style={{background: '#E1F3EF'}}>⚠️</div>
+                    <div className="agent-info"><div className="agent-name">Risk</div><div className="agent-detail">Sharpe 1.4, low drawdown</div></div>
+                    <div className="agent-signal signal-buy">BUY</div>
+                  </div>
+                </div>
+                <div className="verdict-col">
+                  <div className="verdict-ring"><div className="pct">84%</div></div>
+                  <div className="verdict-label">CONSENSUS: BUY</div>
+                  <div className="verdict-sub">Weighted by each agent's historical accuracy.</div>
+                </div>
+              </div>
+            </div>
+            <div className="float-card">
+              <div className="row1"><span className="chk">✓</span>Daily consensus refresh</div>
+              <div className="row2">↻ Re-scoring on new headlines</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="logos-strip">
+        <div className="cap">Signal sources InvestIQ reads in real time</div>
+        <div className="logos-row">
+          <span>NSE</span><span>BSE</span><span>NASDAQ</span><span>Yahoo Finance</span><span>FinBERT</span>
+        </div>
+      </div>
+
+      <section id="agents">
+        <div className="container">
+          <div className="section-head center">
+            <div className="tag">Why InvestIQ</div>
+            <h2>Five specialists, one resolved argument</h2>
+          </div>
+          <div className="agent-grid">
+            <div className="agent-card"><div className="icon" style={{background: '#EEEAFB'}}>📊</div><h3>Quant</h3><p>Technical signal from RSI, MACD and moving averages.</p></div>
+            <div className="agent-card"><div className="icon" style={{background: '#E4F0FC'}}>🔬</div><h3>Fundamental</h3><p>P/E, debt ratios and cash flow vs. sector peers.</p></div>
+            <div className="agent-card"><div className="icon" style={{background: '#FCE8F1'}}>📰</div><h3>Sentiment</h3><p>FinBERT reads recent headlines for market mood.</p></div>
+            <div className="agent-card"><div className="icon" style={{background: '#E1F3EF'}}>⚠️</div><h3>Risk</h3><p>VaR, volatility, Sharpe ratio and max drawdown.</p></div>
+            <div className="agent-card"><div className="icon" style={{background: '#FDECE0'}}>🧠</div><h3>Meta</h3><p>Weighs the four signals into one confidence score.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="how">
+        <div className="container">
+          <div className="split">
+            <div className="split-text">
+              <div className="tag">Consensus, not correlation</div>
+              <h2>Built to disagree before it agrees</h2>
+              <p>Each agent is scored independently before Meta sees the others' output, so a strong chart can't quietly override a weak balance sheet.</p>
+              <ul className="check-list">
+                <li>Every agent explains its reasoning, not just its signal</li>
+                <li>Meta weights each vote by historical accuracy for the sector</li>
+                <li>The full deliberation stays attached to every verdict</li>
+              </ul>
+            </div>
+            <div className="split-visual">
+              <div className="drift-item"><div className="drift-desc"><span>Quant flags bullish MACD cross</span><span className="drift-tag">confidence 0.71</span></div><span className="drift-badge badge-1">weighted</span></div>
+              <div className="drift-item"><div className="drift-desc"><span>Fundamental flags debt ratio</span><span className="drift-tag">confidence 0.63</span></div><span className="drift-badge badge-2">flagged</span></div>
+              <div className="drift-item"><div className="drift-desc"><span>Risk caps position size</span><span className="drift-tag">Sharpe 1.4</span></div><span className="drift-badge badge-3">bounded</span></div>
+              <div className="drift-item"><div className="drift-desc"><span>Meta resolves to weighted BUY</span><span className="drift-tag">84% confidence</span></div><span className="drift-badge badge-4">final</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="final-cta">
+        <div className="container">
+          <div className="cta-card">
+            <h2>Let five agents argue about your next trade before you do</h2>
+            <p>Free to start. No credit card required.</p>
+            <Link to="/analyze" className="btn btn-primary btn-lg">Analyze a stock</Link>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <div className="container footer-bottom">
+          <span>© 2026 InvestIQ</span>
+          <div className="foot-links">
+            <a href="#">Docs</a>
+            <a href="#">Privacy</a>
+            <a href="#">Contact</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+</file>
+
+<file path="frontend/src/pages/LoginPage.css">
+:root{
+  --bg: #F6F1E6;
+  --surface: #FFFFFF;
+  --ink: #2A2820;
+  --muted: #746E5E;
+  --faint: #A29C89;
+  --border: #E9E1CF;
+  --terracotta: #E1673D;
+  --terracotta-dark: #C8532D;
+  --radius: 20px;
+  --shadow: 0 1px 2px rgba(42,40,32,0.05), 0 24px 48px -20px rgba(42,40,32,0.22);
+}
+
+.auth-page {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.auth-page h1, .auth-page .display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; font-weight: 600; color: var(--ink); }
+.auth-page a { text-decoration: none; color: inherit; }
+
+.auth-page .card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 40px 36px 44px;
+}
+
+.auth-page .card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 56px;
+}
+.auth-page .logo { display: flex; align-items: center; gap: 9px; font-family: 'Space Grotesk'; font-weight: 700; font-size: 1.05rem; }
+.auth-page .logo-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--terracotta);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.auth-page .signup-link { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.auth-page .signup-link:hover { color: var(--ink); }
+
+.auth-page h1.title { font-size: 1.7rem; text-align: center; margin-bottom: 32px; }
+
+.auth-page form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.auth-page input[type="email"], .auth-page input[type="password"] {
+  width: 100%;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-family: 'Inter';
+  color: var(--ink);
+  background: var(--surface);
+  outline: none;
+  transition: border-color .15s ease;
+}
+.auth-page input[type="email"]::placeholder, .auth-page input[type="password"]::placeholder { color: var(--faint); }
+.auth-page input[type="email"]:focus, .auth-page input[type="password"]:focus { border-color: var(--terracotta); }
+
+.auth-page .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all .15s ease;
+  font-family: 'Inter';
+}
+.auth-page .btn-primary { background: var(--terracotta); color: white; }
+.auth-page .btn-primary:hover { background: var(--terracotta-dark); }
+.auth-page .btn-primary:disabled { background: var(--border); color: var(--faint); cursor: not-allowed; }
+
+.auth-page .divider { display: flex; align-items: center; gap: 14px; color: var(--faint); font-size: 0.82rem; margin: 22px 0; }
+.auth-page .divider::before, .auth-page .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.auth-page .social-list { display: flex; flex-direction: column; gap: 10px; }
+.auth-page .btn-social {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+}
+.auth-page .btn-social:hover { border-color: var(--ink); }
+.auth-page .btn-social .icon { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+
+.auth-page .foot-note { text-align: center; font-size: 0.78rem; color: var(--faint); margin-top: 28px; line-height: 1.6; }
+.auth-page .foot-note a { color: var(--muted); font-weight: 600; }
+.auth-page .foot-note a:hover { color: var(--ink); }
+</file>
+
+<file path="frontend/src/pages/LoginPage.tsx">
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import './LoginPage.css';
+
+export default function LoginPage() {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('demo@investiq.com');
+  const [password, setPassword] = useState('password123');
+  const navigate = useNavigate();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email === 'demo@investiq.com' && password === 'password123') {
+      navigate('/analyze');
+    } else {
+      alert('Invalid credentials. For this demo, please use demo@investiq.com / password123');
+    }
+  };
+
+  const handleSocialClick = (provider: string) => {
+    alert(`${provider} authentication is not implemented in this demo.`);
+  };
+
+  return (
+    <div className="auth-page">
+      <div className="card">
+        <div className="card-top">
+          <Link to="/" className="logo"><span className="logo-mark">IQ</span>InvestIQ</Link>
+          <button 
+            type="button" 
+            className="signup-link" 
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={() => setIsLogin(!isLogin)}
+          >
+            {isLogin ? 'Sign up' : 'Log in'}
+          </button>
+        </div>
+
+        <h1 className="title">{isLogin ? 'Log in' : 'Create an account'}</h1>
+
+        <form onSubmit={handleSubmit}>
+          <input 
+            type="email" 
+            placeholder="Email" 
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required 
+          />
+          <input 
+            type="password" 
+            placeholder="Password" 
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required 
+          />
+          <button type="submit" className="btn btn-primary">
+            {isLogin ? 'Continue' : 'Sign up'}
+          </button>
+        </form>
+
+        <div className="divider">or</div>
+
+        <div className="social-list">
+          <button type="button" className="btn btn-social" onClick={() => handleSocialClick('Google')}>
+            <span className="icon">
+              <svg viewBox="0 0 18 18" width="18" height="18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.88 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.94v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.17.28-1.7V4.97H.94A9 9 0 0 0 0 9c0 1.45.35 2.83.94 4.03l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .94 4.97l3.01 2.33C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
+            </span>
+            Continue with Google
+          </button>
+          <button type="button" className="btn btn-social" onClick={() => handleSocialClick('Microsoft')}>
+            <span className="icon">
+              <svg viewBox="0 0 18 18" width="16" height="16"><rect x="0" y="0" width="8" height="8" fill="#F25022"/><rect x="10" y="0" width="8" height="8" fill="#7FBA00"/><rect x="0" y="10" width="8" height="8" fill="#00A4EF"/><rect x="10" y="10" width="8" height="8" fill="#FFB900"/></svg>
+            </span>
+            Continue with Microsoft
+          </button>
+          <button type="button" className="btn btn-social" onClick={() => handleSocialClick('Apple')}>
+            <span className="icon">
+              <svg viewBox="0 0 384 512" width="15" height="15"><path fill="currentColor" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+            </span>
+            Continue with Apple
+          </button>
+        </div>
+
+        <p className="foot-note">By continuing, you agree to InvestIQ's <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="frontend/src/App.css">
+/* Navbar */
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--nav-height);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(5, 8, 16, 0.85);
+  border-bottom: 1px solid var(--border-card);
+}
+
+/* Home Page */
+.hero-section {
+  min-height: calc(100vh - var(--nav-height));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px 0 60px;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 50px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  letter-spacing: 0.5px;
+  margin-bottom: 24px;
+}
+
+.hero-badge .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent-green);
+  border-radius: 50%;
+  animation: pulse-glow 2s ease-in-out infinite;
+  box-shadow: 0 0 6px var(--accent-green);
+}
+
+.hero-title {
+  font-size: clamp(3rem, 7vw, 5.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  margin-bottom: 24px;
+}
+
+.hero-title .gradient-text {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-description {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  max-width: 580px;
+  line-height: 1.75;
+  margin-bottom: 40px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hero-stats {
+  display: flex;
+  gap: 40px;
+  margin-top: 64px;
+  padding-top: 40px;
+  border-top: 1px solid var(--border-card);
+}
+
+.hero-stat-value {
+  font-family: 'Outfit', sans-serif;
+  font-size: 2rem;
+  font-weight: 800;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-stat-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Ticker Bar */
+.ticker-bar {
+  background: rgba(0, 0, 0, 0.4);
+  border-top: 1px solid var(--border-card);
+  border-bottom: 1px solid var(--border-card);
+  padding: 10px 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.ticker-bar::before,
+.ticker-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 80px;
+  z-index: 2;
+}
+
+.ticker-bar::before { left: 0; background: linear-gradient(to right, var(--bg-primary), transparent); }
+.ticker-bar::after { right: 0; background: linear-gradient(to left, var(--bg-primary), transparent); }
+
+.ticker-track {
+  display: flex;
+  gap: 48px;
+  animation: ticker-scroll 30s linear infinite;
+  width: max-content;
+}
+
+.ticker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.ticker-symbol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ticker-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ticker-change {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ticker-change.up { color: var(--signal-buy); }
+.ticker-change.down { color: var(--signal-sell); }
+.ticker-dot { width: 1px; height: 16px; background: var(--border-card); }
+
+/* Market Cards Section */
+.market-section {
+  padding: 80px 0;
+}
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+  margin-top: 40px;
+}
+
+.market-card {
+  padding: 24px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.market-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--gradient-card);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  border-radius: inherit;
+}
+
+.market-card:hover::before { opacity: 1; }
+
+.market-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.market-card-symbol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.market-card-name {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.market-card-price {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.market-card-change {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.market-card-change.up { color: var(--signal-buy); }
+.market-card-change.down { color: var(--signal-sell); }
+
+.market-chart-container {
+  height: 90px;
+  margin: 16px -4px 0;
+}
+
+.market-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-card);
+}
+
+.market-card-footer-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.market-card-footer-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Features Section */
+.features-section {
+  padding: 80px 0;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 48px;
+}
+
+.feature-card {
+  padding: 28px;
+}
+
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  margin-bottom: 20px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.feature-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+
+.feature-desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+/* =============================================
+   Analyze Page
+   ============================================= */
+.analyze-page {
+  padding: 48px 0 80px;
+}
+
+.analyze-header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.search-bar {
+  display: flex;
+  gap: 12px;
+  max-width: 620px;
+  margin: 0 auto 16px;
+}
+
+.search-hint {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.search-hint span {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 8px;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-card);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* Results */
+.results-container {
+  margin-top: 40px;
+  animation: fadeInUp 0.5s ease;
+}
+
+.meta-consensus-card {
+  padding: 36px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, rgba(12, 18, 32, 0.95), rgba(8, 12, 24, 0.9));
+  border: 1px solid var(--border-glow);
+  box-shadow: var(--shadow-glow-cyan);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.meta-consensus-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(0, 212, 255, 0.06) 0%, transparent 70%);
+}
+
+.consensus-label {
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.consensus-symbol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  color: var(--accent-cyan);
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+
+.consensus-signal {
+  font-family: 'Outfit', sans-serif;
+  font-size: 4.5rem;
+  font-weight: 900;
+  letter-spacing: -2px;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.consensus-signal.buy { color: var(--signal-buy); text-shadow: 0 0 40px rgba(0, 230, 118, 0.4); }
+.consensus-signal.sell { color: var(--signal-sell); text-shadow: 0 0 40px rgba(255, 68, 68, 0.4); }
+.consensus-signal.hold { color: var(--signal-hold); text-shadow: 0 0 40px rgba(255, 183, 0, 0.4); }
+
+.confidence-bar-container {
+  max-width: 360px;
+  margin: 0 auto 20px;
+}
+
+.confidence-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.confidence-bar-track {
+  height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--gradient-brand);
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+}
+
+.consensus-reasoning {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  max-width: 680px;
+  margin: 0 auto;
+  text-align: left;
+  padding: 16px 20px;
+  background: rgba(0,0,0,0.2);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-glow);
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.agent-card {
+  padding: 24px;
+  position: relative;
+}
+
+.agent-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.agent-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.agent-icon {
+  font-size: 1.4rem;
+  margin-bottom: 4px;
+}
+
+.agent-reasoning {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+/* Risk / Metrics panels */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.metric-card {
+  padding: 20px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.metric-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+
+/* Error state */
+.error-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(255, 68, 68, 0.06);
+  border: 1px solid rgba(255, 68, 68, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--signal-sell);
+  font-size: 0.9rem;
+  font-weight: 500;
+  max-width: 620px;
+  margin: 16px auto 0;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* =============================================
+   About Page
+   ============================================= */
+.about-page {
+  padding: 64px 0 100px;
+}
+
+.about-hero {
+  text-align: center;
+  margin-bottom: 80px;
+}
+
+.pipeline-section {
+  margin-bottom: 80px;
+}
+
+.pipeline {
+  display: flex;
+  gap: 0;
+  margin-top: 48px;
+  position: relative;
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+
+.pipeline::before {
+  content: '';
+  position: absolute;
+  top: 40px;
+  left: 80px;
+  right: 80px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border-glow), transparent);
+}
+
+.pipeline-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 16px;
+  min-width: 130px;
+}
+
+.pipeline-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  margin-bottom: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  box-shadow: var(--shadow-glow-cyan);
+  position: relative;
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.pipeline-step:hover .pipeline-icon {
+  transform: scale(1.1);
+  box-shadow: 0 0 40px rgba(0, 212, 255, 0.3);
+}
+
+.pipeline-step-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.pipeline-step-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.agent-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.agent-detail-card {
+  padding: 28px;
+}
+
+.agent-detail-icon {
+  font-size: 2rem;
+  margin-bottom: 16px;
+}
+
+.agent-detail-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.agent-detail-desc {
+  font-size: 0.87rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.tech-stack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  margin-top: 40px;
+}
+
+.tech-pill {
+  padding: 16px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.3s ease;
+}
+
+.tech-pill:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+}
+
+.tech-pill-icon { font-size: 1.4rem; }
+.tech-pill-name { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
+.tech-pill-type { font-size: 0.73rem; color: var(--text-muted); }
+</file>
+
+<file path="frontend/src/App.tsx">
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
+import HomePage from './pages/HomePage';
+import AnalyzePage from './pages/AnalyzePage';
+import AboutPage from './pages/AboutPage';
+import './index.css';
+import './App.css';
+
+import LoginPage from './pages/LoginPage';
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+function AppLayout() {
+  return (
+    <>
+      <Navbar />
+      <Routes>
+        <Route path="/analyze" element={<AnalyzePage />} />
+        <Route path="/about" element={<AboutPage />} />
+      </Routes>
+    </>
+  );
+}
+</file>
+
+<file path="frontend/src/index.css">
+/* =============================================
+   InvestIQ - Global Design System
+   ============================================= */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Core palette */
+  --bg-primary: #050810;
+  --bg-secondary: #080c14;
+  --bg-card: rgba(12, 18, 32, 0.8);
+  --bg-card-hover: rgba(16, 24, 42, 0.9);
+
+  /* Brand colors */
+  --accent-cyan: #00d4ff;
+  --accent-teal: #00b4a0;
+  --accent-green: #00e676;
+  --accent-purple: #7c3aed;
+  --accent-pink: #f472b6;
+
+  /* Signal colors */
+  --signal-buy: #00e676;
+  --signal-sell: #ff4444;
+  --signal-hold: #ffb700;
+
+  /* Text */
+  --text-primary: #f0f4ff;
+  --text-secondary: #8892a4;
+  --text-muted: #4a5568;
+
+  /* Borders */
+  --border-subtle: rgba(0, 212, 255, 0.08);
+  --border-glow: rgba(0, 212, 255, 0.3);
+  --border-card: rgba(255, 255, 255, 0.06);
+
+  /* Gradients */
+  --gradient-brand: linear-gradient(135deg, #00d4ff 0%, #00b4a0 50%, #7c3aed 100%);
+  --gradient-card: linear-gradient(135deg, rgba(0, 212, 255, 0.05), rgba(124, 58, 237, 0.05));
+  --gradient-buy: linear-gradient(135deg, rgba(0, 230, 118, 0.15), rgba(0, 230, 118, 0.03));
+  --gradient-sell: linear-gradient(135deg, rgba(255, 68, 68, 0.15), rgba(255, 68, 68, 0.03));
+  --gradient-hold: linear-gradient(135deg, rgba(255, 183, 0, 0.15), rgba(255, 183, 0, 0.03));
+
+  /* Shadows */
+  --shadow-card: 0 4px 32px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255,255,255,0.03) inset;
+  --shadow-glow-cyan: 0 0 40px rgba(0, 212, 255, 0.15);
+  --shadow-glow-buy: 0 0 20px rgba(0, 230, 118, 0.3);
+  --shadow-glow-sell: 0 0 20px rgba(255, 68, 68, 0.3);
+
+  /* Spacing */
+  --nav-height: 68px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* =============================================
+   Background Orbs
+   ============================================= */
+body::before {
+  content: '';
+  position: fixed;
+  top: -20%;
+  left: -10%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(0, 212, 255, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+  animation: orb-drift 20s ease-in-out infinite alternate;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  bottom: -20%;
+  right: -10%;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.07) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+  animation: orb-drift 25s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes orb-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(40px, 30px) scale(1.1); }
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* =============================================
+   Typography
+   ============================================= */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* =============================================
+   Scrollbar
+   ============================================= */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.4); }
+
+/* =============================================
+   Layout Utilities
+   ============================================= */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.page-wrapper {
+  min-height: 100vh;
+  padding-top: var(--nav-height);
+}
+
+/* =============================================
+   Navigation
+   ============================================= */
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--nav-height);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(5, 8, 16, 0.85);
+  border-bottom: 1px solid var(--border-card);
+}
+
+.navbar .container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-logo {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 800;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  letter-spacing: -0.5px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+}
+
+.nav-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.nav-links a:hover,
+.nav-links a.active {
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.nav-links a.active::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  background: var(--accent-cyan);
+  border-radius: 50%;
+}
+
+.nav-cta {
+  background: var(--gradient-brand);
+  color: #050810 !important;
+  font-weight: 700 !important;
+  padding: 8px 20px !important;
+  border-radius: var(--radius-sm) !important;
+  transition: all 0.3s ease !important;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+}
+
+.nav-cta:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.4) !important;
+  background: rgba(0, 212, 255, 0.1) !important;
+  color: var(--accent-cyan) !important;
+}
+
+/* =============================================
+   Glass Cards
+   ============================================= */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-glow);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card), var(--shadow-glow-cyan);
+}
+
+/* =============================================
+   Buttons
+   ============================================= */
+button {
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--gradient-brand);
+  color: #050810;
+  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.25);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 212, 255, 0.45);
+}
+
+.btn-primary:disabled {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-muted);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--accent-cyan);
+  border: 1px solid var(--border-glow);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.05);
+}
+
+.btn-outline:hover {
+  background: rgba(0, 212, 255, 0.08);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.btn-lg {
+  padding: 16px 40px;
+  font-size: 1.05rem;
+  border-radius: var(--radius-md);
+}
+
+/* =============================================
+   Inputs
+   ============================================= */
+.input-field {
+  font-family: 'Inter', sans-serif;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-card);
+  color: var(--text-primary);
+  padding: 14px 20px;
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  width: 100%;
+  transition: all 0.3s ease;
+  outline: none;
+}
+
+.input-field::placeholder { color: var(--text-muted); }
+
+.input-field:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1), 0 0 20px rgba(0, 212, 255, 0.15);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* =============================================
+   Signal Tags
+   ============================================= */
+.signal-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 50px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.signal-tag.buy {
+  background: rgba(0, 230, 118, 0.12);
+  color: var(--signal-buy);
+  border: 1px solid rgba(0, 230, 118, 0.3);
+  box-shadow: 0 0 12px rgba(0, 230, 118, 0.1);
+}
+
+.signal-tag.sell {
+  background: rgba(255, 68, 68, 0.12);
+  color: var(--signal-sell);
+  border: 1px solid rgba(255, 68, 68, 0.3);
+  box-shadow: 0 0 12px rgba(255, 68, 68, 0.1);
+}
+
+.signal-tag.hold {
+  background: rgba(255, 183, 0, 0.12);
+  color: var(--signal-hold);
+  border: 1px solid rgba(255, 183, 0, 0.3);
+  box-shadow: 0 0 12px rgba(255, 183, 0, 0.1);
+}
+
+/* =============================================
+   Loader
+   ============================================= */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid rgba(0, 212, 255, 0.15);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* =============================================
+   Section Titles
+   ============================================= */
+.section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+  margin-bottom: 8px;
+}
+
+.section-title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  line-height: 1.15;
+}
+
+.section-subtitle {
+  font-size: 1.05rem;
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.7;
+}
+
+/* =============================================
+   Animations
+   ============================================= */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.15); }
+  50%       { box-shadow: 0 0 40px rgba(0, 212, 255, 0.35); }
+}
+
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-fade-up {
+  animation: fadeInUp 0.6s ease forwards;
+}
+
+.animate-fade-up-delay-1 { animation: fadeInUp 0.6s ease 0.1s forwards; opacity: 0; }
+.animate-fade-up-delay-2 { animation: fadeInUp 0.6s ease 0.2s forwards; opacity: 0; }
+.animate-fade-up-delay-3 { animation: fadeInUp 0.6s ease 0.3s forwards; opacity: 0; }
+.animate-fade-up-delay-4 { animation: fadeInUp 0.6s ease 0.4s forwards; opacity: 0; }
+
+/* =============================================
+   Footer
+   ============================================= */
+.footer {
+  border-top: 1px solid var(--border-card);
+  padding: 32px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.footer span {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+}
+</file>
+
+<file path="frontend/src/main.tsx">
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+</file>
+
+<file path="frontend/.gitignore">
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+</file>
+
+<file path="frontend/.oxlintrc.json">
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+</file>
+
+<file path="frontend/index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InvestIQ | Autonomous Multi-Agent Financial Intelligence</title>
+    <meta name="description" content="InvestIQ uses autonomous multi-agent AI to deliver consensus-driven investment advisory for Indian and global equities." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+</file>
+
+<file path="frontend/package.json">
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}
+</file>
+
+<file path="frontend/README.md">
+# React + TypeScript + Vite
+
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+
+Currently, two official plugins are available:
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+
+## React Compiler
+
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+
+## Expanding the Oxlint configuration
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+```
+
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+</file>
+
+<file path="frontend/tsconfig.app.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "types": ["vite/client"],
+    "allowArbitraryExtensions": true,
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}
+</file>
+
+<file path="frontend/tsconfig.json">
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+</file>
+
+<file path="frontend/tsconfig.node.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "module": "nodenext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["vite.config.ts"]
+}
+</file>
+
+<file path="frontend/vite.config.ts">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+</file>
+
+<file path="README.md">
+# InvestIQ
+
+InvestIQ is an autonomous multi-agent system for financial consensus and risk-weighted investment advisory, targeting Indian equities (NSE/BSE).
+
+## Architecture
+- **Frontend:** React + TypeScript
+- **Backend:** FastAPI (Python 3.11+)
+- **LLM/Orchestration:** LangGraph (State-based multi-agent deliberation)
+
+## Setup Instructions
+
+### 1. Backend Setup
+```bash
+cd backend
+python -m venv venv
+# On Windows
+venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# Set your API keys in .env
+uvicorn app.main:app --reload
+```
+
+### 2. Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 3. Docker (Optional)
+```bash
+docker-compose up -d
+```
+</file>
+
+</files>
