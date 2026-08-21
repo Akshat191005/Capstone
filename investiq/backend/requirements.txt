@@ -13,3 +13,6 @@ langchain-groq
 pydantic
 python-dotenv
 pytest
+langchain-google-genai
+langchain-openai
+langchain-anthropic
